@@ -43,7 +43,7 @@ struct OAuthTokenResponse: Codable {
 
 // MARK: - Host Models
 
-struct Host: Identifiable, Codable {
+struct Host: Identifiable, Codable, Hashable {
     let id: String
     let hostname: String?
     let localIp: String?
@@ -322,7 +322,7 @@ struct Host: Identifiable, Codable {
 
 // MARK: - HostGroup
 
-struct HostGroup: Codable {
+struct HostGroup: Codable, Hashable {
     let id: String?
     let name: String?
     

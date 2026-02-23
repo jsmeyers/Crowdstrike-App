@@ -7,11 +7,16 @@ struct EndpointsListView: View {
     var body: some View {
         List {
             ForEach(hosts) { host in
-                HostRow(host: host)
+                NavigationLink(value: host) {
+                    HostRow(host: host)
+                }
             }
         }
         .listStyle(.plain)
         .searchable(text: $searchQuery, prompt: "Search endpoints...")
+        .navigationDestination(for: Host.self) { host in
+            HostDetailView(host: host)
+        }
     }
 }
 
