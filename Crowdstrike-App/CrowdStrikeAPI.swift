@@ -320,37 +320,6 @@ struct Host: Identifiable, Codable {
     }
 }
 
-// MARK: - Date Extension
-
-extension Date {
-    func timeAgoString() -> String {
-        let interval = Date().timeIntervalSince(self)
-        return Date.timeAgoString(from: interval)
-    }
-    
-    static func timeAgoString(from interval: TimeInterval) -> String {
-        let seconds = Int(interval)
-        if seconds < 0 { return "in the future" }
-        if seconds < 60 { return "\(seconds) sec ago" }
-        
-        let minutes = seconds / 60
-        if minutes < 60 { return "\(minutes) min ago" }
-        
-        let hours = minutes / 60
-        if hours < 24 {
-            let remainingMinutes = minutes % 60
-            return remainingMinutes == 0 ? "\(hours) hr ago" : "\(hours) hr \(remainingMinutes) min ago"
-        }
-        
-        let days = hours / 24
-        if days < 7 {
-            let remainingHours = hours % 24
-            return remainingHours == 0 ? "\(days) day\(days == 1 ? "" : "s") ago" : "\(days) day\(days == 1 ? "" : "s") \(remainingHours) hr ago"
-        }
-        return "\(days) days ago"
-    }
-}
-
 // MARK: - HostGroup
 
 struct HostGroup: Codable {
@@ -376,7 +345,7 @@ struct HostGroup: Codable {
 
 // MARK: - Alert Model
 
-struct Alert: Identifiable, Codable {
+struct Alert: Identifiable, Codable, Hashable {
     let id: String
     let name: String?
     let description: String?
@@ -397,6 +366,59 @@ struct Alert: Identifiable, Codable {
     let policyId: String?
     let policyName: String?
     
+    // Additional details
+    let scenario: String?
+    let objective: String?
+    let patternId: String?
+    let platform: String?
+    let osVersion: String?
+    let agentVersion: String?
+    let serviceProvider: String?
+    let serviceProviderId: String?
+    let confidence: Int?
+    let severityName: String?
+    let displayTimestamp: String?
+    let startTime: String?
+    let endTime: String?
+    let detectedByFalconX: Bool?
+    let detectedBySensor: Bool?
+    let detectedByCloud: Bool?
+    let isFalconGroup: Bool?
+    let isEndpointGroup: Bool?
+    
+    // Process/Execution details
+    let fileName: String?
+    let filePath: String?
+    let sha256: String?
+    let md5: String?
+    let commandLine: String?
+    let processId: String?
+    let parentProcessId: String?
+    let parentFileName: String?
+    let parentCommandLine: String?
+    
+    // Network details
+    let localIp: String?
+    let localPort: Int?
+    let remoteIp: String?
+    let remotePort: Int?
+    let networkProtocol: String?
+    let networkDirection: String?
+    
+    // Location/Org details
+    let country: String?
+    let city: String?
+    let site: String?
+    let siteId: String?
+    let machineDomain: String?
+    let ou: String?
+    
+    // Tags and grouping
+    let tags: [String]?
+    let hostGroups: [String]?
+    let assignedTo: String?
+    let assignedToName: String?
+    
     enum CodingKeys: String, CodingKey {
         case id
         case name
@@ -406,7 +428,7 @@ struct Alert: Identifiable, Codable {
         case createdTime = "created_time"
         case updatedTime = "updated_time"
         case hostname
-        case username
+        case username = "user_name"
         case tactic
         case technique
         case tacticId = "tactic_id"
@@ -417,11 +439,65 @@ struct Alert: Identifiable, Codable {
         case type
         case policyId = "policy_id"
         case policyName = "policy_name"
+        
+        // Additional details
+        case scenario
+        case objective
+        case patternId = "pattern_id"
+        case platform
+        case osVersion = "os_version"
+        case agentVersion = "agent_version"
+        case serviceProvider = "service_provider"
+        case serviceProviderId = "service_provider_id"
+        case confidence
+        case severityName = "severity_name"
+        case displayTimestamp = "display_timestamp"
+        case startTime = "start_time"
+        case endTime = "end_time"
+        case detectedByFalconX = "detected_by_falconx"
+        case detectedBySensor = "detected_by_sensor"
+        case detectedByCloud = "detected_by_cloud"
+        case isFalconGroup = "is_falcon_group"
+        case isEndpointGroup = "is_endpoint_group"
+        
+        // Process/Execution details
+        case fileName = "filename"
+        case filePath = "filepath"
+        case sha256
+        case md5
+        case commandLine = "cmdline"
+        case processId = "process_id"
+        case parentProcessId = "parent_process_id"
+        case parentFileName = "parent_filename"
+        case parentCommandLine = "parent_cmdline"
+        
+        // Network details
+        case localIp = "local_ip"
+        case localPort = "local_port"
+        case remoteIp = "remote_ip"
+        case remotePort = "remote_port"
+        case networkProtocol = "protocol"
+        case networkDirection = "network_direction"
+        
+        // Location/Org details
+        case country
+        case city
+        case site
+        case siteId = "site_id"
+        case machineDomain = "machine_domain"
+        case ou
+        
+        // Tags and grouping
+        case tags
+        case hostGroups = "host_groups"
+        case assignedTo = "assigned_to"
+        case assignedToName = "assigned_to_name"
     }
     
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         
+        // Handle ID as either String or Int
         if let idString = try? container.decode(String.self, forKey: .id) {
             id = idString
         } else if let idInt = try? container.decode(Int.self, forKey: .id) {
@@ -430,6 +506,7 @@ struct Alert: Identifiable, Codable {
             id = "unknown"
         }
         
+        // Basic fields
         name = try container.decodeIfPresent(String.self, forKey: .name)
         description = try container.decodeIfPresent(String.self, forKey: .description)
         severity = try container.decodeIfPresent(Int.self, forKey: .severity)
@@ -448,15 +525,112 @@ struct Alert: Identifiable, Codable {
         type = try container.decodeIfPresent(String.self, forKey: .type)
         policyId = try container.decodeIfPresent(String.self, forKey: .policyId)
         policyName = try container.decodeIfPresent(String.self, forKey: .policyName)
+        
+        // Additional details
+        scenario = try container.decodeIfPresent(String.self, forKey: .scenario)
+        objective = try container.decodeIfPresent(String.self, forKey: .objective)
+        
+        // Handle patternId as either String or Int
+        if let patternIdString = try? container.decodeIfPresent(String.self, forKey: .patternId) {
+            patternId = patternIdString
+        } else if let patternIdInt = try? container.decodeIfPresent(Int.self, forKey: .patternId) {
+            patternId = String(patternIdInt)
+        } else {
+            patternId = nil
+        }
+        
+        platform = try container.decodeIfPresent(String.self, forKey: .platform)
+        osVersion = try container.decodeIfPresent(String.self, forKey: .osVersion)
+        agentVersion = try container.decodeIfPresent(String.self, forKey: .agentVersion)
+        serviceProvider = try container.decodeIfPresent(String.self, forKey: .serviceProvider)
+        serviceProviderId = try container.decodeIfPresent(String.self, forKey: .serviceProviderId)
+        confidence = try container.decodeIfPresent(Int.self, forKey: .confidence)
+        severityName = try container.decodeIfPresent(String.self, forKey: .severityName)
+        displayTimestamp = try container.decodeIfPresent(String.self, forKey: .displayTimestamp)
+        startTime = try container.decodeIfPresent(String.self, forKey: .startTime)
+        endTime = try container.decodeIfPresent(String.self, forKey: .endTime)
+        detectedByFalconX = try container.decodeIfPresent(Bool.self, forKey: .detectedByFalconX)
+        detectedBySensor = try container.decodeIfPresent(Bool.self, forKey: .detectedBySensor)
+        detectedByCloud = try container.decodeIfPresent(Bool.self, forKey: .detectedByCloud)
+        isFalconGroup = try container.decodeIfPresent(Bool.self, forKey: .isFalconGroup)
+        isEndpointGroup = try container.decodeIfPresent(Bool.self, forKey: .isEndpointGroup)
+        
+        // Process/Execution details
+        fileName = try container.decodeIfPresent(String.self, forKey: .fileName)
+        filePath = try container.decodeIfPresent(String.self, forKey: .filePath)
+        sha256 = try container.decodeIfPresent(String.self, forKey: .sha256)
+        md5 = try container.decodeIfPresent(String.self, forKey: .md5)
+        commandLine = try container.decodeIfPresent(String.self, forKey: .commandLine)
+        processId = try container.decodeIfPresent(String.self, forKey: .processId)
+        parentProcessId = try container.decodeIfPresent(String.self, forKey: .parentProcessId)
+        parentFileName = try container.decodeIfPresent(String.self, forKey: .parentFileName)
+        parentCommandLine = try container.decodeIfPresent(String.self, forKey: .parentCommandLine)
+        
+        // Network details
+        localIp = try container.decodeIfPresent(String.self, forKey: .localIp)
+        localPort = try container.decodeIfPresent(Int.self, forKey: .localPort)
+        remoteIp = try container.decodeIfPresent(String.self, forKey: .remoteIp)
+        remotePort = try container.decodeIfPresent(Int.self, forKey: .remotePort)
+        networkProtocol = try container.decodeIfPresent(String.self, forKey: .networkProtocol)
+        networkDirection = try container.decodeIfPresent(String.self, forKey: .networkDirection)
+        
+        // Location/Org details
+        country = try container.decodeIfPresent(String.self, forKey: .country)
+        city = try container.decodeIfPresent(String.self, forKey: .city)
+        site = try container.decodeIfPresent(String.self, forKey: .site)
+        siteId = try container.decodeIfPresent(String.self, forKey: .siteId)
+        machineDomain = try container.decodeIfPresent(String.self, forKey: .machineDomain)
+        ou = try container.decodeIfPresent(String.self, forKey: .ou)
+        
+        // Tags and grouping
+        tags = try container.decodeIfPresent([String].self, forKey: .tags)
+        hostGroups = try container.decodeIfPresent([String].self, forKey: .hostGroups)
+        assignedTo = try container.decodeIfPresent(String.self, forKey: .assignedTo)
+        assignedToName = try container.decodeIfPresent(String.self, forKey: .assignedToName)
     }
+    
+    // Hashable conformance - just hash the ID since it's already Identifiable
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+    }
+    
+    static func == (lhs: Alert, rhs: Alert) -> Bool {
+        lhs.id == rhs.id
+    }
+    
+    // MARK: - Computed Properties
     
     var createdDate: Date? {
         guard let createdTime = createdTime else { return nil }
+        return parseISO8601Date(createdTime)
+    }
+    
+    var updatedDate: Date? {
+        guard let updatedTime = updatedTime else { return nil }
+        return parseISO8601Date(updatedTime)
+    }
+    
+    var startDate: Date? {
+        guard let startTime = startTime else { return nil }
+        return parseISO8601Date(startTime)
+    }
+    
+    var endDate: Date? {
+        guard let endTime = endTime else { return nil }
+        return parseISO8601Date(endTime)
+    }
+    
+    var displayDate: Date? {
+        guard let displayTimestamp = displayTimestamp else { return nil }
+        return parseISO8601Date(displayTimestamp)
+    }
+    
+    private func parseISO8601Date(_ string: String) -> Date? {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = formatter.date(from: createdTime) { return date }
+        if let date = formatter.date(from: string) { return date }
         formatter.formatOptions = [.withInternetDateTime]
-        return formatter.date(from: createdTime)
+        return formatter.date(from: string)
     }
     
     var createdAgo: String? {
@@ -464,7 +638,15 @@ struct Alert: Identifiable, Codable {
         return date.timeAgoString()
     }
     
+    var updatedAgo: String? {
+        guard let date = updatedDate else { return nil }
+        return date.timeAgoString()
+    }
+    
     var severityText: String {
+        if let name = severityName, !name.isEmpty {
+            return name
+        }
         switch severity {
         case 4, 5: return "Critical"
         case 3: return "High"
@@ -472,6 +654,17 @@ struct Alert: Identifiable, Codable {
         case 1: return "Low"
         case 0: return "Informational"
         default: return "Unknown"
+        }
+    }
+    
+    var severityIcon: String {
+        switch severity {
+        case 4, 5: return "exclamationmark.octagon.fill"
+        case 3: return "exclamationmark.triangle.fill"
+        case 2: return "exclamationmark.circle.fill"
+        case 1: return "info.circle.fill"
+        case 0: return "info.circle"
+        default: return "questionmark.circle"
         }
     }
     
@@ -483,6 +676,78 @@ struct Alert: Identifiable, Codable {
         case "reopened": return "Reopened"
         default: return status?.capitalized ?? "Unknown"
         }
+    }
+    
+    var statusColor: String {
+        switch status?.lowercased() {
+        case "new": return "red"
+        case "in_progress", "in progress": return "orange"
+        case "closed": return "green"
+        case "reopened": return "yellow"
+        default: return "gray"
+        }
+    }
+    
+    var detectionSourceText: String {
+        var sources: [String] = []
+        if detectedBySensor == true { sources.append("Sensor") }
+        if detectedByCloud == true { sources.append("Cloud") }
+        if detectedByFalconX == true { sources.append("Falcon X") }
+        return sources.isEmpty ? "Unknown" : sources.joined(separator: ", ")
+    }
+    
+    var isNetworkAlert: Bool {
+        localIp != nil || remoteIp != nil || localPort != nil || remotePort != nil
+    }
+    
+    var hasProcessInfo: Bool {
+        fileName != nil || commandLine != nil || processId != nil
+    }
+    
+    var networkSummary: String? {
+        guard isNetworkAlert else { return nil }
+        var parts: [String] = []
+        if let proto = networkProtocol {
+            parts.append(proto.uppercased())
+        }
+        if let local = localIp, let port = localPort {
+            parts.append("\(local):\(port)")
+        } else if let local = localIp {
+            parts.append(local)
+        }
+        if let direction = networkDirection {
+            parts.append(direction)
+        }
+        if let remote = remoteIp, let port = remotePort {
+            parts.append("→ \(remote):\(port)")
+        } else if let remote = remoteIp {
+            parts.append("→ \(remote)")
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " ")
+    }
+    
+    var processSummary: String? {
+        guard hasProcessInfo else { return nil }
+        var parts: [String] = []
+        if let file = fileName {
+            parts.append(file)
+        }
+        if let cmd = commandLine {
+            let trimmed = cmd.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.count > 100 {
+                parts.append(String(trimmed.prefix(100)) + "...")
+            } else if !trimmed.isEmpty {
+                parts.append(trimmed)
+            }
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: "\n")
+    }
+    
+    var locationText: String? {
+        var parts: [String] = []
+        if let city = city, !city.isEmpty { parts.append(city) }
+        if let country = country, !country.isEmpty { parts.append(country) }
+        return parts.isEmpty ? nil : parts.joined(separator: ", ")
     }
 }
 
@@ -623,6 +888,22 @@ actor CrowdStrikeAPIClient {
         return URLSession(configuration: sessionConfig)
     }
     
+    // MARK: - Helper Methods
+    
+    /// Properly encodes an FQL filter string for use in a URL query parameter.
+    /// The + character (AND operator in FQL) must be encoded as %2B, otherwise
+    /// it gets interpreted as a space by the server.
+    private func encodeFQLFilter(_ filter: String) -> String {
+        guard let encoded = filter.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else {
+            return filter
+        }
+        // + must be %2B in URL query strings, otherwise it's interpreted as a space
+        // Also encode = as %3D to avoid any ambiguity
+        return encoded
+            .replacingOccurrences(of: "+", with: "%2B")
+            .replacingOccurrences(of: "=", with: "%3D")
+    }
+    
     // MARK: - Authentication
     
     func authenticate(clientId: String, clientSecret: String) async throws {
@@ -701,19 +982,17 @@ actor CrowdStrikeAPIClient {
     private func searchHostsPage(query: String?, offset: Int?, limit: Int) async throws -> (hostIds: [String], nextOffset: Int?, total: Int?) {
         try await ensureValidToken()
         
-        var urlComponents = URLComponents(string: "\(configuration.baseURLWithProtocol)/devices/queries/devices/v1")!
-        var queryItems: [URLQueryItem] = [URLQueryItem(name: "limit", value: String(limit))]
+        // Build URL string manually to handle FQL filter encoding properly
+        var urlString = "\(configuration.baseURLWithProtocol)/devices/queries/devices/v1?limit=\(limit)"
         
         if let query = query, !query.isEmpty {
-            queryItems.append(URLQueryItem(name: "filter", value: query))
+            urlString += "&filter=\(encodeFQLFilter(query))"
         }
         if let offset = offset {
-            queryItems.append(URLQueryItem(name: "offset", value: String(offset)))
+            urlString += "&offset=\(offset)"
         }
         
-        urlComponents.queryItems = queryItems
-        
-        guard let url = urlComponents.url else { throw APIErrorType.invalidResponse }
+        guard let url = URL(string: urlString) else { throw APIErrorType.invalidResponse }
         
         var request = URLRequest(url: url)
         request.setValue("Bearer \(accessToken!)", forHTTPHeaderField: "Authorization")
@@ -762,14 +1041,13 @@ actor CrowdStrikeAPIClient {
     func searchAndRetrieveHostsWithProgress(query: String?, progressHandler: @escaping (Int, Int) -> Void) async throws -> [Host] {
         try await ensureValidToken()
         
-        var countUrlComponents = URLComponents(string: "\(configuration.baseURLWithProtocol)/devices/queries/devices/v1")!
-        var countQueryItems: [URLQueryItem] = [URLQueryItem(name: "limit", value: "1")]
+        // Build URL string manually to handle FQL filter encoding properly
+        var countUrlString = "\(configuration.baseURLWithProtocol)/devices/queries/devices/v1?limit=1"
         if let query = query, !query.isEmpty {
-            countQueryItems.append(URLQueryItem(name: "filter", value: query))
+            countUrlString += "&filter=\(encodeFQLFilter(query))"
         }
-        countUrlComponents.queryItems = countQueryItems
         
-        guard let countUrl = countUrlComponents.url else { throw APIErrorType.invalidResponse }
+        guard let countUrl = URL(string: countUrlString) else { throw APIErrorType.invalidResponse }
         var countRequest = URLRequest(url: countUrl)
         countRequest.setValue("Bearer \(accessToken!)", forHTTPHeaderField: "Authorization")
         
@@ -825,13 +1103,35 @@ actor CrowdStrikeAPIClient {
     
     // MARK: - Alerts API
     
-    func fetchAlerts(limit: Int = 500, filterThirdParty: Bool = true, progressHandler: @escaping (Int, Int) -> Void = { _, _ in }) async throws -> [Alert] {
+    func fetchAlerts(limit: Int = 500, minSeverity: Int? = 55, since: Date? = nil, filterThirdParty: Bool = true, progressHandler: @escaping (Int, Int) -> Void = { _, _ in }) async throws -> [Alert] {
         try await ensureValidToken()
         
-        var urlComponents = URLComponents(string: "\(configuration.baseURLWithProtocol)/alerts/queries/alerts/v2")!
-        urlComponents.queryItems = [URLQueryItem(name: "limit", value: String(limit))]
+        // Build filter string with + as AND operator in FQL
+        var filters: [String] = []
         
-        guard let url = urlComponents.url else { throw APIErrorType.invalidResponse }
+        // Add severity filter
+        // Note: severity is an integer field and must NOT be quoted
+        if let minSeverity = minSeverity {
+            filters.append("severity:>=\(minSeverity)")
+        }
+        
+        // Add time filter for alerts created since the specified date (default: last 7 days)
+        // Note: timestamps are string fields and MUST be quoted
+        let sinceDate = since ?? Date().addingTimeInterval(-7 * 24 * 60 * 60)
+        let isoFormatter = ISO8601DateFormatter()
+        isoFormatter.formatOptions = [.withInternetDateTime]
+        let sinceString = isoFormatter.string(from: sinceDate)
+        filters.append("created_timestamp:>='\(sinceString)'")
+        
+        // Join filters with + (AND operator in FQL)
+        let filterString = filters.joined(separator: "+")
+        
+        // Build URL string manually with proper FQL encoding
+        let urlString = "\(configuration.baseURLWithProtocol)/alerts/queries/alerts/v2?limit=\(limit)&filter=\(encodeFQLFilter(filterString))"
+        
+        guard let url = URL(string: urlString) else { throw APIErrorType.invalidResponse }
+        
+        print("Alerts API URL: \(url.absoluteString)")
         
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
@@ -855,36 +1155,38 @@ actor CrowdStrikeAPIClient {
             return []
         }
         
+        print("Fetched \(alertIds.count) total alert IDs from API")
+        
         // Filter out third-party alerts if user has selected that option
         let filteredIds: [String]
         if filterThirdParty {
+            let thirdPartyCount = alertIds.filter { $0.contains(":thirdparty:") }.count
             filteredIds = alertIds.filter { !$0.contains(":thirdparty:") }
+            print("Filtering enabled: \(thirdPartyCount) third-party alerts removed, \(filteredIds.count) remaining")
         } else {
             filteredIds = alertIds
+            print("Filtering disabled: keeping all \(filteredIds.count) alerts")
         }
+        
         let totalCount = filteredIds.count
-        
-        if filterThirdParty {
-            print("Fetched \(alertIds.count) total alert IDs, \(totalCount) non-third-party")
-        } else {
-            print("Fetched \(alertIds.count) total alert IDs (including third-party)")
-        }
-        
         progressHandler(0, totalCount)
         
         guard !filteredIds.isEmpty else {
-            print("No alerts to fetch")
+            print("No non-third-party alerts to fetch")
             return []
         }
         
         var allAlerts: [Alert] = []
         let batchSize = 50
+        var errorCount = 0
         
         for i in stride(from: 0, to: filteredIds.count, by: batchSize) {
             try Task.checkCancellation()
             
             let batchEnd = min(i + batchSize, filteredIds.count)
             let batchIds = Array(filteredIds[i..<batchEnd])
+            
+            print("Fetching alert batch \(i/batchSize + 1): IDs \(i) to \(batchEnd)")
             
             let detailsUrl = URL(string: "\(configuration.baseURLWithProtocol)/alerts/entities/alerts/v2")!
             
@@ -901,19 +1203,48 @@ actor CrowdStrikeAPIClient {
                 let (detailsData, detailsResponse) = try await session.data(for: detailsRequest)
                 let statusCode = (detailsResponse as? HTTPURLResponse)?.statusCode ?? 0
                 
-                if statusCode == 200,
-                   let alerts = try? JSONDecoder().decode(AlertDetailsResponse.self, from: detailsData).resources {
-                    allAlerts.append(contentsOf: alerts)
+                if statusCode == 200 {
+                    let decoder = JSONDecoder()
+                    do {
+                        let alertDetailsResponse = try decoder.decode(AlertDetailsResponse.self, from: detailsData)
+                        if let alerts = alertDetailsResponse.resources {
+                            allAlerts.append(contentsOf: alerts)
+                            print("Successfully decoded \(alerts.count) alerts in this batch")
+                        } else {
+                            print("No resources in alert details response")
+                        }
+                    } catch {
+                        print("Failed to decode alert details: \(error)")
+                        errorCount += 1
+                    }
                     progressHandler(batchEnd, totalCount)
+                } else {
+                    print("Alert details fetch returned status code: \(statusCode)")
+                    if let responseString = String(data: detailsData, encoding: .utf8) {
+                        print("Error response: \(responseString)")
+                    }
+                    errorCount += 1
                 }
             } catch URLError.cancelled {
+                print("Alert fetch cancelled")
                 throw APIErrorType.networkError(URLError(.cancelled))
             } catch {
                 print("Alert fetch error: \(error.localizedDescription)")
+                errorCount += 1
             }
         }
         
-        print("Total alerts retrieved: \(allAlerts.count)")
+        // Client-side severity filter as fallback (in case API filter doesn't work as expected)
+        if let minSeverity = minSeverity {
+            let beforeCount = allAlerts.count
+            allAlerts = allAlerts.filter { ($0.severity ?? 0) >= minSeverity }
+            let filteredCount = beforeCount - allAlerts.count
+            if filteredCount > 0 {
+                print("Client-side severity filter removed \(filteredCount) alerts below severity \(minSeverity)")
+            }
+        }
+        
+        print("Total alerts retrieved: \(allAlerts.count), errors encountered: \(errorCount)")
         return allAlerts
     }
     
@@ -939,5 +1270,35 @@ actor CrowdStrikeAPIClient {
         }
         
         return httpResponse.statusCode == 200
+    }
+}
+
+// MARK: - Date Extension
+extension Date {
+    func timeAgoString() -> String {
+        let interval = Date().timeIntervalSince(self)
+        return Date.timeAgoString(from: interval)
+    }
+    
+    static func timeAgoString(from interval: TimeInterval) -> String {
+        let seconds = Int(interval)
+        if seconds < 0 { return "in the future" }
+        if seconds < 60 { return "\(seconds) sec ago" }
+        
+        let minutes = seconds / 60
+        if minutes < 60 { return "\(minutes) min ago" }
+        
+        let hours = minutes / 60
+        if hours < 24 {
+            let remainingMinutes = minutes % 60
+            return remainingMinutes == 0 ? "\(hours) hr ago" : "\(hours) hr \(remainingMinutes) min ago"
+        }
+        
+        let days = hours / 24
+        if days < 7 {
+            let remainingHours = hours % 24
+            return remainingHours == 0 ? "\(days) day\(days == 1 ? "" : "s") ago" : "\(days) day\(days == 1 ? "" : "s") \(remainingHours) hr ago"
+        }
+        return "\(days) days ago"
     }
 }

@@ -70,6 +70,8 @@ class HostsViewModel {
         config.save()
         configuration = config
         await apiClient.updateConfiguration(config)
+        // Re-apply filter in case stale endpoint setting changed
+        applyLocalFilter()
     }
     
     func checkCredentials() async {
@@ -208,14 +210,26 @@ class HostsViewModel {
     
     /// Apply local search filter to cached hosts
     private func applyLocalFilter() {
+        var filtered = allHosts
+        
+        // Filter out stale endpoints if enabled
+        if configuration.hideStaleEndpoints {
+            let cutoffDate = Date().addingTimeInterval(-Double(configuration.staleEndpointDays) * 24 * 60 * 60)
+            filtered = filtered.filter { host in
+                guard let lastSeen = host.lastSeenDate else { return false }
+                return lastSeen >= cutoffDate
+            }
+        }
+        
+        // Apply search query filter
         let trimmedQuery = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         
         guard !trimmedQuery.isEmpty else {
-            hosts = allHosts
+            hosts = filtered
             return
         }
         
-        hosts = allHosts.filter { host in
+        hosts = filtered.filter { host in
             host.hostname?.lowercased().contains(trimmedQuery) == true ||
             host.localIp?.lowercased().contains(trimmedQuery) == true ||
             host.externalIp?.lowercased().contains(trimmedQuery) == true ||

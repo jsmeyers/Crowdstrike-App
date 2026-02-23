@@ -62,6 +62,10 @@ struct AppConfiguration: Codable, Equatable {
     // Alerts
     var filterThirdPartyAlerts: Bool = true
     
+    // Endpoints
+    var hideStaleEndpoints: Bool = false
+    var staleEndpointDays: Int = 30
+    
     // Debug
     var isDebugModeEnabled: Bool = false
     var enableVerboseLogging: Bool = false

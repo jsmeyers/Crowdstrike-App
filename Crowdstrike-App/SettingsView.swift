@@ -78,6 +78,28 @@ struct SettingsView: View {
                 }
             }
             
+            Section("Endpoints") {
+                Toggle("Hide Stale Endpoints", isOn: $viewModel.configuration.hideStaleEndpoints)
+                    .onChange(of: viewModel.configuration.hideStaleEndpoints) { _, newValue in
+                        Task {
+                            await viewModel.saveConfiguration(viewModel.configuration)
+                        }
+                    }
+                
+                if viewModel.configuration.hideStaleEndpoints {
+                    Stepper("Days: \(viewModel.configuration.staleEndpointDays)", value: $viewModel.configuration.staleEndpointDays, in: 7...90)
+                        .onChange(of: viewModel.configuration.staleEndpointDays) { _, newValue in
+                            Task {
+                                await viewModel.saveConfiguration(viewModel.configuration)
+                            }
+                        }
+                }
+                
+                Text("When enabled, endpoints that haven't connected in the specified number of days will be hidden from the list.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            
             Section("Alerts") {
                 Toggle("Filter Third-Party Alerts", isOn: $viewModel.configuration.filterThirdPartyAlerts)
                     .onChange(of: viewModel.configuration.filterThirdPartyAlerts) { _, newValue in
@@ -86,9 +108,16 @@ struct SettingsView: View {
                         }
                     }
                 
-                Text("When enabled, alerts from third-party integrations are hidden from the alerts list.")
+                Text("When enabled, alerts from third-party integrations are hidden. Toggle this off to see all alerts including third-party ones.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                
+                Button("Refresh Alerts") {
+                    Task {
+                        await viewModel.refreshAlerts()
+                    }
+                }
+                .disabled(!viewModel.hasCredentials || viewModel.isLoadingAlerts)
             }
             
             Section {
@@ -111,6 +140,9 @@ struct SettingsView: View {
                 if let lastRefresh = viewModel.lastRefresh {
                     LabeledContent("Last Refresh", value: lastRefresh, format: .dateTime)
                 }
+                LabeledContent("Total Endpoints", value: "\(viewModel.allHosts.count)")
+                LabeledContent("Visible Endpoints", value: "\(viewModel.hosts.count)")
+                LabeledContent("Total Alerts", value: "\(viewModel.allAlerts.count)")
             }
         }
         .navigationTitle("Settings")
