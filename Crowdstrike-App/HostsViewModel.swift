@@ -64,14 +64,27 @@ class HostsViewModel {
     
     func loadConfiguration() async {
         configuration = await apiClient.getConfiguration()
+        applyDebugSettings()
     }
     
     func saveConfiguration(_ config: AppConfiguration) async {
         config.save()
         configuration = config
         await apiClient.updateConfiguration(config)
+        applyDebugSettings()
         // Re-apply filter in case stale endpoint setting changed
         applyLocalFilter()
+    }
+    
+    private func applyDebugSettings() {
+        // Sync debug settings to the DebugLogger singleton
+        DebugLogger.shared.isEnabled = configuration.isDebugModeEnabled
+        DebugLogger.shared.verboseEnabled = configuration.enableVerboseLogging
+        
+        // Sync debug settings to the API client
+        Task {
+            await apiClient.setLoggingEnabled(configuration.isDebugModeEnabled)
+        }
     }
     
     func checkCredentials() async {
@@ -81,6 +94,7 @@ class HostsViewModel {
         
         configuration = AppConfiguration.load()
         await apiClient.updateConfiguration(configuration)
+        applyDebugSettings()
     }
     
     func authenticate(clientId: String, clientSecret: String, region: CrowdStrikeRegion) async {

@@ -120,6 +120,26 @@ struct SettingsView: View {
                 .disabled(!viewModel.hasCredentials || viewModel.isLoadingAlerts)
             }
             
+            Section("Debug") {
+                Toggle("Enable API Response Logging", isOn: $viewModel.configuration.isDebugModeEnabled)
+                    .onChange(of: viewModel.configuration.isDebugModeEnabled) { _, newValue in
+                        Task {
+                            await viewModel.saveConfiguration(viewModel.configuration)
+                        }
+                    }
+                
+                Toggle("Verbose Logging", isOn: $viewModel.configuration.enableVerboseLogging)
+                    .onChange(of: viewModel.configuration.enableVerboseLogging) { _, newValue in
+                        Task {
+                            await viewModel.saveConfiguration(viewModel.configuration)
+                        }
+                    }
+                
+                Text("When enabled, API responses and network activity will be logged to the console. Useful for troubleshooting API issues.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            
             Section {
                 Button("Test Connection", role: .none) {
                     Task {

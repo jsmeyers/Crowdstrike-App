@@ -343,6 +343,92 @@ struct HostGroup: Codable, Hashable {
     }
 }
 
+// MARK: - Alert Device (nested in Alert response)
+
+struct AlertDevice: Codable {
+    let deviceId: String?
+    let hostname: String?
+    let localIp: String?
+    let externalIp: String?
+    let macAddress: String?
+    let osVersion: String?
+    let platformName: String?
+    let status: String?
+    let lastSeen: String?
+    let firstSeen: String?
+    let country: String?
+    let city: String?
+    let agentVersion: String?
+    let machineDomain: String?
+    let siteName: String?
+    let productType: String?
+    let productTypeDesc: String?
+    let systemManufacturer: String?
+    let systemProductName: String?
+    let majorVersion: String?
+    let minorVersion: String?
+    let cid: String?
+    let ou: [String]?
+    let groups: [String]?
+    let tags: [String]?
+    
+    enum CodingKeys: String, CodingKey {
+        case deviceId = "device_id"
+        case hostname
+        case localIp = "local_ip"
+        case externalIp = "external_ip"
+        case macAddress = "mac_address"
+        case osVersion = "os_version"
+        case platformName = "platform_name"
+        case status
+        case lastSeen = "last_seen"
+        case firstSeen = "first_seen"
+        case country
+        case city
+        case agentVersion = "agent_version"
+        case machineDomain = "machine_domain"
+        case siteName = "site_name"
+        case productType = "product_type"
+        case productTypeDesc = "product_type_desc"
+        case systemManufacturer = "system_manufacturer"
+        case systemProductName = "system_product_name"
+        case majorVersion = "major_version"
+        case minorVersion = "minor_version"
+        case cid
+        case ou
+        case groups
+        case tags
+    }
+}
+
+// MARK: - Alert Process Details
+
+struct AlertProcessDetails: Codable {
+    let sha256: String?
+    let md5: String?
+    let filename: String?
+    let filepath: String?
+    let cmdline: String?
+    let processId: String?
+    let localProcessId: String?
+    let userId: String?
+    let userName: String?
+    let timestamp: String?
+    
+    enum CodingKeys: String, CodingKey {
+        case sha256
+        case md5
+        case filename
+        case filepath
+        case cmdline
+        case processId = "process_id"
+        case localProcessId = "local_process_id"
+        case userId = "user_id"
+        case userName = "user_name"
+        case timestamp
+    }
+}
+
 // MARK: - Alert Model
 
 struct Alert: Identifiable, Codable, Hashable {
@@ -353,49 +439,34 @@ struct Alert: Identifiable, Codable, Hashable {
     let status: String?
     let createdTime: String?
     let updatedTime: String?
-    let hostname: String?
-    let username: String?
     let tactic: String?
     let technique: String?
     let tacticId: String?
     let techniqueId: String?
     let cid: String?
-    let deviceId: String?
-    let productId: String?
     let type: String?
-    let policyId: String?
-    let policyName: String?
-    
-    // Additional details
     let scenario: String?
     let objective: String?
     let patternId: String?
-    let platform: String?
-    let osVersion: String?
-    let agentVersion: String?
-    let serviceProvider: String?
-    let serviceProviderId: String?
     let confidence: Int?
     let severityName: String?
-    let displayTimestamp: String?
     let startTime: String?
     let endTime: String?
-    let detectedByFalconX: Bool?
-    let detectedBySensor: Bool?
-    let detectedByCloud: Bool?
-    let isFalconGroup: Bool?
-    let isEndpointGroup: Bool?
     
-    // Process/Execution details
+    // Process details (at root level)
     let fileName: String?
     let filePath: String?
     let sha256: String?
     let md5: String?
     let commandLine: String?
     let processId: String?
-    let parentProcessId: String?
-    let parentFileName: String?
-    let parentCommandLine: String?
+    let localProcessId: String?
+    let userId: String?
+    let userName: String?
+    
+    // Parent/Grandparent process details
+    let parentDetails: AlertProcessDetails?
+    let grandparentDetails: AlertProcessDetails?
     
     // Network details
     let localIp: String?
@@ -405,19 +476,28 @@ struct Alert: Identifiable, Codable, Hashable {
     let networkProtocol: String?
     let networkDirection: String?
     
-    // Location/Org details
+    // Location/Org details (at root level for some alerts)
     let country: String?
     let city: String?
-    let site: String?
+    let rootSite: String?
     let siteId: String?
-    let machineDomain: String?
-    let ou: String?
+    let rootMachineDomain: String?
+    let rootOu: String?
     
     // Tags and grouping
     let tags: [String]?
     let hostGroups: [String]?
     let assignedTo: String?
     let assignedToName: String?
+    let policyId: String?
+    let policyName: String?
+    
+    // Nested device object - contains host information
+    let device: AlertDevice?
+    
+    // Computed ID from composite_id
+    let compositeId: String?
+    let agentId: String?
     
     enum CodingKeys: String, CodingKey {
         case id
@@ -425,86 +505,83 @@ struct Alert: Identifiable, Codable, Hashable {
         case description
         case severity
         case status
-        case createdTime = "created_time"
-        case updatedTime = "updated_time"
-        case hostname
-        case username = "user_name"
+        case createdTime = "created_timestamp"
+        case updatedTime = "updated_timestamp"
         case tactic
         case technique
         case tacticId = "tactic_id"
         case techniqueId = "technique_id"
         case cid
-        case deviceId = "device_id"
-        case productId = "product_id"
         case type
-        case policyId = "policy_id"
-        case policyName = "policy_name"
-        
-        // Additional details
         case scenario
         case objective
         case patternId = "pattern_id"
-        case platform
-        case osVersion = "os_version"
-        case agentVersion = "agent_version"
-        case serviceProvider = "service_provider"
-        case serviceProviderId = "service_provider_id"
         case confidence
         case severityName = "severity_name"
-        case displayTimestamp = "display_timestamp"
-        case startTime = "start_time"
-        case endTime = "end_time"
-        case detectedByFalconX = "detected_by_falconx"
-        case detectedBySensor = "detected_by_sensor"
-        case detectedByCloud = "detected_by_cloud"
-        case isFalconGroup = "is_falcon_group"
-        case isEndpointGroup = "is_endpoint_group"
+        case startTime = "timestamp"
+        case endTime = "process_end_time"
         
-        // Process/Execution details
+        // Process details
         case fileName = "filename"
         case filePath = "filepath"
         case sha256
         case md5
         case commandLine = "cmdline"
-        case processId = "process_id"
-        case parentProcessId = "parent_process_id"
-        case parentFileName = "parent_filename"
-        case parentCommandLine = "parent_cmdline"
+        case processId = "parent_process_id"
+        case localProcessId = "local_process_id"
+        case userId = "user_id"
+        case userName = "user_name"
         
-        // Network details
+        // Parent/Grandparent
+        case parentDetails = "parent_details"
+        case grandparentDetails = "grandparent_details"
+        
+        // Network
         case localIp = "local_ip"
         case localPort = "local_port"
         case remoteIp = "remote_ip"
         case remotePort = "remote_port"
         case networkProtocol = "protocol"
-        case networkDirection = "network_direction"
+        case networkDirection
         
-        // Location/Org details
+        // Location
         case country
         case city
-        case site
+        case rootSite = "site"
         case siteId = "site_id"
-        case machineDomain = "machine_domain"
-        case ou
+        case rootMachineDomain = "machine_domain"
+        case rootOu = "ou"
         
-        // Tags and grouping
+        // Tags
         case tags
         case hostGroups = "host_groups"
         case assignedTo = "assigned_to"
         case assignedToName = "assigned_to_name"
+        case policyId = "policy_id"
+        case policyName = "policy_name"
+        
+        // Device
+        case device
+        case compositeId = "composite_id"
+        case agentId = "agent_id"
     }
     
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         
-        // Handle ID as either String or Int
-        if let idString = try? container.decode(String.self, forKey: .id) {
+        // Handle ID - use composite_id if available, otherwise fall back
+        compositeId = try container.decodeIfPresent(String.self, forKey: .compositeId)
+        if let compositeId = compositeId {
+            id = compositeId
+        } else if let idString = try? container.decode(String.self, forKey: .id) {
             id = idString
         } else if let idInt = try? container.decode(Int.self, forKey: .id) {
             id = String(idInt)
         } else {
             id = "unknown"
         }
+        
+        agentId = try container.decodeIfPresent(String.self, forKey: .agentId)
         
         // Basic fields
         name = try container.decodeIfPresent(String.self, forKey: .name)
@@ -513,20 +590,12 @@ struct Alert: Identifiable, Codable, Hashable {
         status = try container.decodeIfPresent(String.self, forKey: .status)
         createdTime = try container.decodeIfPresent(String.self, forKey: .createdTime)
         updatedTime = try container.decodeIfPresent(String.self, forKey: .updatedTime)
-        hostname = try container.decodeIfPresent(String.self, forKey: .hostname)
-        username = try container.decodeIfPresent(String.self, forKey: .username)
         tactic = try container.decodeIfPresent(String.self, forKey: .tactic)
         technique = try container.decodeIfPresent(String.self, forKey: .technique)
         tacticId = try container.decodeIfPresent(String.self, forKey: .tacticId)
         techniqueId = try container.decodeIfPresent(String.self, forKey: .techniqueId)
         cid = try container.decodeIfPresent(String.self, forKey: .cid)
-        deviceId = try container.decodeIfPresent(String.self, forKey: .deviceId)
-        productId = try container.decodeIfPresent(String.self, forKey: .productId)
         type = try container.decodeIfPresent(String.self, forKey: .type)
-        policyId = try container.decodeIfPresent(String.self, forKey: .policyId)
-        policyName = try container.decodeIfPresent(String.self, forKey: .policyName)
-        
-        // Additional details
         scenario = try container.decodeIfPresent(String.self, forKey: .scenario)
         objective = try container.decodeIfPresent(String.self, forKey: .objective)
         
@@ -539,34 +608,27 @@ struct Alert: Identifiable, Codable, Hashable {
             patternId = nil
         }
         
-        platform = try container.decodeIfPresent(String.self, forKey: .platform)
-        osVersion = try container.decodeIfPresent(String.self, forKey: .osVersion)
-        agentVersion = try container.decodeIfPresent(String.self, forKey: .agentVersion)
-        serviceProvider = try container.decodeIfPresent(String.self, forKey: .serviceProvider)
-        serviceProviderId = try container.decodeIfPresent(String.self, forKey: .serviceProviderId)
         confidence = try container.decodeIfPresent(Int.self, forKey: .confidence)
         severityName = try container.decodeIfPresent(String.self, forKey: .severityName)
-        displayTimestamp = try container.decodeIfPresent(String.self, forKey: .displayTimestamp)
         startTime = try container.decodeIfPresent(String.self, forKey: .startTime)
         endTime = try container.decodeIfPresent(String.self, forKey: .endTime)
-        detectedByFalconX = try container.decodeIfPresent(Bool.self, forKey: .detectedByFalconX)
-        detectedBySensor = try container.decodeIfPresent(Bool.self, forKey: .detectedBySensor)
-        detectedByCloud = try container.decodeIfPresent(Bool.self, forKey: .detectedByCloud)
-        isFalconGroup = try container.decodeIfPresent(Bool.self, forKey: .isFalconGroup)
-        isEndpointGroup = try container.decodeIfPresent(Bool.self, forKey: .isEndpointGroup)
         
-        // Process/Execution details
+        // Process details
         fileName = try container.decodeIfPresent(String.self, forKey: .fileName)
         filePath = try container.decodeIfPresent(String.self, forKey: .filePath)
         sha256 = try container.decodeIfPresent(String.self, forKey: .sha256)
         md5 = try container.decodeIfPresent(String.self, forKey: .md5)
         commandLine = try container.decodeIfPresent(String.self, forKey: .commandLine)
         processId = try container.decodeIfPresent(String.self, forKey: .processId)
-        parentProcessId = try container.decodeIfPresent(String.self, forKey: .parentProcessId)
-        parentFileName = try container.decodeIfPresent(String.self, forKey: .parentFileName)
-        parentCommandLine = try container.decodeIfPresent(String.self, forKey: .parentCommandLine)
+        localProcessId = try container.decodeIfPresent(String.self, forKey: .localProcessId)
+        userId = try container.decodeIfPresent(String.self, forKey: .userId)
+        userName = try container.decodeIfPresent(String.self, forKey: .userName)
         
-        // Network details
+        // Parent/Grandparent
+        parentDetails = try container.decodeIfPresent(AlertProcessDetails.self, forKey: .parentDetails)
+        grandparentDetails = try container.decodeIfPresent(AlertProcessDetails.self, forKey: .grandparentDetails)
+        
+        // Network
         localIp = try container.decodeIfPresent(String.self, forKey: .localIp)
         localPort = try container.decodeIfPresent(Int.self, forKey: .localPort)
         remoteIp = try container.decodeIfPresent(String.self, forKey: .remoteIp)
@@ -574,22 +636,27 @@ struct Alert: Identifiable, Codable, Hashable {
         networkProtocol = try container.decodeIfPresent(String.self, forKey: .networkProtocol)
         networkDirection = try container.decodeIfPresent(String.self, forKey: .networkDirection)
         
-        // Location/Org details
+        // Location
         country = try container.decodeIfPresent(String.self, forKey: .country)
         city = try container.decodeIfPresent(String.self, forKey: .city)
-        site = try container.decodeIfPresent(String.self, forKey: .site)
+        rootSite = try container.decodeIfPresent(String.self, forKey: .rootSite)
         siteId = try container.decodeIfPresent(String.self, forKey: .siteId)
-        machineDomain = try container.decodeIfPresent(String.self, forKey: .machineDomain)
-        ou = try container.decodeIfPresent(String.self, forKey: .ou)
+        rootMachineDomain = try container.decodeIfPresent(String.self, forKey: .rootMachineDomain)
+        rootOu = try container.decodeIfPresent(String.self, forKey: .rootOu)
         
-        // Tags and grouping
+        // Tags
         tags = try container.decodeIfPresent([String].self, forKey: .tags)
         hostGroups = try container.decodeIfPresent([String].self, forKey: .hostGroups)
         assignedTo = try container.decodeIfPresent(String.self, forKey: .assignedTo)
         assignedToName = try container.decodeIfPresent(String.self, forKey: .assignedToName)
+        policyId = try container.decodeIfPresent(String.self, forKey: .policyId)
+        policyName = try container.decodeIfPresent(String.self, forKey: .policyName)
+        
+        // Device - nested object with host info
+        device = try container.decodeIfPresent(AlertDevice.self, forKey: .device)
     }
     
-    // Hashable conformance - just hash the ID since it's already Identifiable
+    // Hashable conformance
     func hash(into hasher: inout Hasher) {
         hasher.combine(id)
     }
@@ -598,7 +665,12 @@ struct Alert: Identifiable, Codable, Hashable {
         lhs.id == rhs.id
     }
     
-    // MARK: - Computed Properties
+    // MARK: - Computed Properties (pull from device if available)
+    
+    var hostname: String? { device?.hostname }
+    var deviceId: String? { device?.deviceId }
+    var platform: String? { device?.platformName }
+    var osVersion: String? { device?.osVersion }
     
     var createdDate: Date? {
         guard let createdTime = createdTime else { return nil }
@@ -618,11 +690,6 @@ struct Alert: Identifiable, Codable, Hashable {
     var endDate: Date? {
         guard let endTime = endTime else { return nil }
         return parseISO8601Date(endTime)
-    }
-    
-    var displayDate: Date? {
-        guard let displayTimestamp = displayTimestamp else { return nil }
-        return parseISO8601Date(displayTimestamp)
     }
     
     private func parseISO8601Date(_ string: String) -> Date? {
@@ -647,23 +714,25 @@ struct Alert: Identifiable, Codable, Hashable {
         if let name = severityName, !name.isEmpty {
             return name
         }
-        switch severity {
-        case 4, 5: return "Critical"
-        case 3: return "High"
-        case 2: return "Medium"
-        case 1: return "Low"
-        case 0: return "Informational"
+        let severityValue = severity ?? -1
+        switch severityValue {
+        case 80...100: return "Critical"
+        case 60..<80: return "High"
+        case 40..<60: return "Medium"
+        case 20..<40: return "Low"
+        case 0..<20: return "Informational"
         default: return "Unknown"
         }
     }
     
     var severityIcon: String {
-        switch severity {
-        case 4, 5: return "exclamationmark.octagon.fill"
-        case 3: return "exclamationmark.triangle.fill"
-        case 2: return "exclamationmark.circle.fill"
-        case 1: return "info.circle.fill"
-        case 0: return "info.circle"
+        let severityValue = severity ?? -1
+        switch severityValue {
+        case 80...100: return "exclamationmark.octagon.fill"
+        case 60..<80: return "exclamationmark.triangle.fill"
+        case 40..<60: return "exclamationmark.circle.fill"
+        case 20..<40: return "info.circle.fill"
+        case 0..<20: return "info.circle"
         default: return "questionmark.circle"
         }
     }
@@ -689,11 +758,8 @@ struct Alert: Identifiable, Codable, Hashable {
     }
     
     var detectionSourceText: String {
-        var sources: [String] = []
-        if detectedBySensor == true { sources.append("Sensor") }
-        if detectedByCloud == true { sources.append("Cloud") }
-        if detectedByFalconX == true { sources.append("Falcon X") }
-        return sources.isEmpty ? "Unknown" : sources.joined(separator: ", ")
+        // Could be extended based on source_products or other fields
+        return "CrowdStrike Falcon"
     }
     
     var isNetworkAlert: Bool {
@@ -701,53 +767,46 @@ struct Alert: Identifiable, Codable, Hashable {
     }
     
     var hasProcessInfo: Bool {
-        fileName != nil || commandLine != nil || processId != nil
+        fileName != nil || commandLine != nil || processId != nil || parentDetails != nil
     }
     
-    var networkSummary: String? {
-        guard isNetworkAlert else { return nil }
-        var parts: [String] = []
-        if let proto = networkProtocol {
-            parts.append(proto.uppercased())
-        }
-        if let local = localIp, let port = localPort {
-            parts.append("\(local):\(port)")
-        } else if let local = localIp {
-            parts.append(local)
-        }
-        if let direction = networkDirection {
-            parts.append(direction)
-        }
-        if let remote = remoteIp, let port = remotePort {
-            parts.append("→ \(remote):\(port)")
-        } else if let remote = remoteIp {
-            parts.append("→ \(remote)")
-        }
-        return parts.isEmpty ? nil : parts.joined(separator: " ")
+    var hasHostInfo: Bool {
+        device != nil || hostname != nil || deviceId != nil || platform != nil || osVersion != nil
     }
     
-    var processSummary: String? {
-        guard hasProcessInfo else { return nil }
-        var parts: [String] = []
-        if let file = fileName {
-            parts.append(file)
-        }
-        if let cmd = commandLine {
-            let trimmed = cmd.trimmingCharacters(in: .whitespacesAndNewlines)
-            if trimmed.count > 100 {
-                parts.append(String(trimmed.prefix(100)) + "...")
-            } else if !trimmed.isEmpty {
-                parts.append(trimmed)
-            }
-        }
-        return parts.isEmpty ? nil : parts.joined(separator: "\n")
-    }
+    var parentFileName: String? { parentDetails?.filename }
+    var parentCommandLine: String? { parentDetails?.cmdline }
     
     var locationText: String? {
+        // Check device first, then root level
+        if let device = device {
+            var parts: [String] = []
+            if let city = device.city, !city.isEmpty { parts.append(city) }
+            if let country = device.country, !country.isEmpty { parts.append(country) }
+            if !parts.isEmpty { return parts.joined(separator: ", ") }
+        }
         var parts: [String] = []
         if let city = city, !city.isEmpty { parts.append(city) }
         if let country = country, !country.isEmpty { parts.append(country) }
         return parts.isEmpty ? nil : parts.joined(separator: ", ")
+    }
+    
+    var username: String? {
+        userName ?? parentDetails?.userName
+    }
+    
+    var site: String? {
+        rootSite ?? device?.siteName
+    }
+    
+    var machineDomain: String? {
+        rootMachineDomain ?? device?.machineDomain
+    }
+    
+    var ou: String? {
+        if let rootOu = rootOu, !rootOu.isEmpty { return rootOu }
+        if let deviceOu = device?.ou, !deviceOu.isEmpty { return deviceOu.joined(separator: ", ") }
+        return nil
     }
 }
 
@@ -843,18 +902,26 @@ actor CrowdStrikeAPIClient {
     
     private let keychain = KeychainManager.shared
     
+    /// Set to true to log raw API responses to the console for debugging
+    private var shouldLogResponses: Bool = false
+    
     private init() {}
     
     // MARK: - Configuration
     
     func updateConfiguration(_ config: AppConfiguration) {
         self.configuration = config
+        self.shouldLogResponses = config.isDebugModeEnabled
         accessToken = nil
         tokenExpiration = nil
     }
     
     func getConfiguration() -> AppConfiguration {
         return configuration
+    }
+    
+    func setLoggingEnabled(_ enabled: Bool) {
+        self.shouldLogResponses = enabled
     }
     
     // MARK: - URL Session Configuration
@@ -904,6 +971,27 @@ actor CrowdStrikeAPIClient {
             .replacingOccurrences(of: "=", with: "%3D")
     }
     
+    /// Logs API response data to the console in a formatted way
+    private func logResponse(_ data: Data, label: String) {
+        guard shouldLogResponses else { return }
+        
+        print("\n" + String(repeating: "=", count: 80))
+        print("=== \(label) ===")
+        print(String(repeating: "=", count: 80))
+        
+        if let jsonString = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let prettyData = try? JSONSerialization.data(withJSONObject: jsonString, options: .prettyPrinted),
+           let prettyString = String(data: prettyData, encoding: .utf8) {
+            print(prettyString)
+        } else if let rawString = String(data: data, encoding: .utf8) {
+            print(rawString)
+        } else {
+            print("[Unable to decode response data]")
+        }
+        
+        print(String(repeating: "=", count: 80) + "\n")
+    }
+    
     // MARK: - Authentication
     
     func authenticate(clientId: String, clientSecret: String) async throws {
@@ -917,6 +1005,8 @@ actor CrowdStrikeAPIClient {
         
         let session = createURLSession()
         let (data, response) = try await session.data(for: request)
+        
+        logResponse(data, label: "OAuth Token Response")
         
         guard let httpResponse = response as? HTTPURLResponse else {
             throw APIErrorType.invalidResponse
@@ -964,6 +1054,8 @@ actor CrowdStrikeAPIClient {
         case .oauth:
             if let (clientId, clientSecret) = try? await keychain.retrieveCredentials() {
                 try await authenticate(clientId: clientId, clientSecret: clientSecret)
+                // Restore logging setting after re-auth
+                self.shouldLogResponses = configuration.isDebugModeEnabled
             } else {
                 throw APIErrorType.notAuthenticated
             }
@@ -1001,6 +1093,8 @@ actor CrowdStrikeAPIClient {
         let session = createURLSession()
         let (data, response) = try await session.data(for: request)
         
+        logResponse(data, label: "Host Search Response")
+        
         guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
             throw APIErrorType.requestFailed(
                 statusCode: (response as? HTTPURLResponse)?.statusCode ?? 0,
@@ -1027,6 +1121,8 @@ actor CrowdStrikeAPIClient {
         
         let session = createURLSession()
         let (data, response) = try await session.data(for: request)
+        
+        logResponse(data, label: "Host Details Response (\(hostIds.count) hosts)")
         
         guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
             throw APIErrorType.requestFailed(
@@ -1109,7 +1205,7 @@ actor CrowdStrikeAPIClient {
         // Build filter string with + as AND operator in FQL
         var filters: [String] = []
         
-        // Add severity filter
+        // Add severity filter (crowdStrike uses 0-100 scale in alerts API)
         // Note: severity is an integer field and must NOT be quoted
         if let minSeverity = minSeverity {
             filters.append("severity:>=\(minSeverity)")
@@ -1140,6 +1236,8 @@ actor CrowdStrikeAPIClient {
         
         let session = createURLSession()
         let (data, response) = try await session.data(for: request)
+        
+        logResponse(data, label: "Alerts Query Response")
         
         guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
             throw APIErrorType.requestFailed(
@@ -1179,6 +1277,7 @@ actor CrowdStrikeAPIClient {
         var allAlerts: [Alert] = []
         let batchSize = 50
         var errorCount = 0
+        var loggedFirstBatch = false
         
         for i in stride(from: 0, to: filteredIds.count, by: batchSize) {
             try Task.checkCancellation()
@@ -1202,6 +1301,12 @@ actor CrowdStrikeAPIClient {
             do {
                 let (detailsData, detailsResponse) = try await session.data(for: detailsRequest)
                 let statusCode = (detailsResponse as? HTTPURLResponse)?.statusCode ?? 0
+                
+                // Log the first batch response in detail for inspection
+                if !loggedFirstBatch {
+                    logResponse(detailsData, label: "Alert Details Response (First Batch)")
+                    loggedFirstBatch = true
+                }
                 
                 if statusCode == 200 {
                     let decoder = JSONDecoder()

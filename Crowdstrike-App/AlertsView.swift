@@ -169,7 +169,7 @@ struct AlertDetailView: View {
                 }
                 
                 // Host Information
-                if alert.hostname != nil || alert.deviceId != nil {
+                if alert.hasHostInfo {
                     GroupBox("Host") {
                         VStack(alignment: .leading, spacing: 8) {
                             if let hostname = alert.hostname {
