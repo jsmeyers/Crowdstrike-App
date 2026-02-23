@@ -896,7 +896,7 @@ actor CrowdStrikeAPIClient {
     
     static let shared = CrowdStrikeAPIClient()
     
-    private var configuration: AppConfiguration = .load()
+    private var configuration: AppConfiguration = .default
     private var accessToken: String?
     private var tokenExpiration: Date?
     
