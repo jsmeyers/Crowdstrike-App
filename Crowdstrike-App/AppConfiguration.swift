@@ -59,6 +59,9 @@ struct AppConfiguration: Codable, Equatable {
     // Proxy
     var proxy: ProxyConfiguration = .default
     
+    // Alerts
+    var filterThirdPartyAlerts: Bool = true
+    
     // Debug
     var isDebugModeEnabled: Bool = false
     var enableVerboseLogging: Bool = false

@@ -172,7 +172,10 @@ class HostsViewModel {
         alertTotalCount = 0
         
         do {
-            allAlerts = try await apiClient.fetchAlerts(limit: 500) { [weak self] loaded, total in
+            allAlerts = try await apiClient.fetchAlerts(
+                limit: 500,
+                filterThirdParty: configuration.filterThirdPartyAlerts
+            ) { [weak self] loaded, total in
                 Task { @MainActor in
                     self?.alertLoadedCount = loaded
                     self?.alertTotalCount = total

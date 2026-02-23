@@ -825,7 +825,7 @@ actor CrowdStrikeAPIClient {
     
     // MARK: - Alerts API
     
-    func fetchAlerts(limit: Int = 500, progressHandler: @escaping (Int, Int) -> Void = { _, _ in }) async throws -> [Alert] {
+    func fetchAlerts(limit: Int = 500, filterThirdParty: Bool = true, progressHandler: @escaping (Int, Int) -> Void = { _, _ in }) async throws -> [Alert] {
         try await ensureValidToken()
         
         var urlComponents = URLComponents(string: "\(configuration.baseURLWithProtocol)/alerts/queries/alerts/v2")!
@@ -855,15 +855,25 @@ actor CrowdStrikeAPIClient {
             return []
         }
         
-        // Filter out third-party alerts
-        let filteredIds = alertIds.filter { !$0.contains(":thirdparty:") }
+        // Filter out third-party alerts if user has selected that option
+        let filteredIds: [String]
+        if filterThirdParty {
+            filteredIds = alertIds.filter { !$0.contains(":thirdparty:") }
+        } else {
+            filteredIds = alertIds
+        }
         let totalCount = filteredIds.count
-        print("Fetched \(alertIds.count) total alert IDs, \(totalCount) non-third-party")
+        
+        if filterThirdParty {
+            print("Fetched \(alertIds.count) total alert IDs, \(totalCount) non-third-party")
+        } else {
+            print("Fetched \(alertIds.count) total alert IDs (including third-party)")
+        }
         
         progressHandler(0, totalCount)
         
         guard !filteredIds.isEmpty else {
-            print("No non-third-party alerts to fetch")
+            print("No alerts to fetch")
             return []
         }
         
