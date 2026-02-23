@@ -24,6 +24,23 @@ class HostsViewModel {
         }
     }
     
+    // Filter state
+    var selectedStatuses: Set<EndpointStatus> = [] {
+        didSet {
+            applyLocalFilter()
+        }
+    }
+    
+    var selectedPlatforms: Set<EndpointPlatform> = [] {
+        didSet {
+            applyLocalFilter()
+        }
+    }
+    
+    var isFilterActive: Bool {
+        !selectedStatuses.isEmpty || !selectedPlatforms.isEmpty
+    }
+    
     // Filtered hosts for display
     private(set) var hosts: [Host] = []
     
@@ -33,6 +50,12 @@ class HostsViewModel {
     var loadingProgress: Double = 0.0
     var loadedCount: Int = 0
     var totalCount: Int = 0
+    
+    // Refreshing state (for pull-to-refresh with cached data)
+    var isRefreshing = false
+    var refreshProgress: Double = 0.0
+    var refreshLoadedCount: Int = 0
+    var refreshTotalCount: Int = 0
     
     // Alert loading progress
     var isLoadingAlerts = false
@@ -50,15 +73,80 @@ class HostsViewModel {
     
     private let apiClient = CrowdStrikeAPIClient.shared
     
+    // Cache URLs
+    private let fileManager = FileManager.default
+    private var cacheDirectory: URL {
+        fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first!
+            .appendingPathComponent("CrowdStrikeCache", isDirectory: true)
+    }
+    private var hostsCacheURL: URL { cacheDirectory.appendingPathComponent("hosts.json") }
+    private var alertsCacheURL: URL { cacheDirectory.appendingPathComponent("alerts.json") }
+    private var lastRefreshURL: URL { cacheDirectory.appendingPathComponent("lastRefresh.json") }
+    
     enum Tab: String, CaseIterable {
         case endpoints = "Endpoints"
         case alerts = "Alerts"
     }
     
     init() {
+        // Load cached data immediately
+        loadCachedData()
+        
         Task {
             await checkCredentials()
             await loadConfiguration()
+        }
+    }
+    
+    // MARK: - Caching
+    
+    private func loadCachedData() {
+        // Create cache directory if needed
+        if !fileManager.fileExists(atPath: cacheDirectory.path) {
+            try? fileManager.createDirectory(at: cacheDirectory, withIntermediateDirectories: true)
+        }
+        
+        // Load cached hosts
+        if let data = try? Data(contentsOf: hostsCacheURL),
+           let cachedHosts = try? JSONDecoder().decode([Host].self, from: data) {
+            allHosts = cachedHosts
+            applyLocalFilter()
+            print("Loaded \(cachedHosts.count) cached hosts")
+        }
+        
+        // Load cached alerts
+        if let data = try? Data(contentsOf: alertsCacheURL),
+           let cachedAlerts = try? JSONDecoder().decode([Alert].self, from: data) {
+            allAlerts = cachedAlerts
+            print("Loaded \(cachedAlerts.count) cached alerts")
+        }
+        
+        // Load last refresh timestamp
+        if let data = try? Data(contentsOf: lastRefreshURL),
+           let refreshDate = try? JSONDecoder().decode(Date.self, from: data) {
+            lastRefresh = refreshDate
+        }
+    }
+    
+    private func saveCachedData() {
+        // Ensure cache directory exists
+        if !fileManager.fileExists(atPath: cacheDirectory.path) {
+            try? fileManager.createDirectory(at: cacheDirectory, withIntermediateDirectories: true)
+        }
+        
+        // Save hosts
+        if let data = try? JSONEncoder().encode(allHosts) {
+            try? data.write(to: hostsCacheURL)
+        }
+        
+        // Save alerts
+        if let data = try? JSONEncoder().encode(allAlerts) {
+            try? data.write(to: alertsCacheURL)
+        }
+        
+        // Save last refresh timestamp
+        if let date = lastRefresh, let data = try? JSONEncoder().encode(date) {
+            try? data.write(to: lastRefreshURL)
         }
     }
     
@@ -148,7 +236,7 @@ class HostsViewModel {
         loadingMessage = nil
     }
     
-    /// Fetches ALL hosts from the API with pagination
+    /// Fetches ALL hosts from the API with pagination (full load screen)
     func refreshHosts() async {
         isLoading = true
         loadingMessage = "Fetching endpoints..."
@@ -168,6 +256,7 @@ class HostsViewModel {
             }
             lastRefresh = Date()
             applyLocalFilter()
+            saveCachedData()
             
             // Also fetch alerts
             await refreshAlerts()
@@ -178,6 +267,33 @@ class HostsViewModel {
         isLoading = false
         loadingMessage = nil
         loadingProgress = 0
+    }
+    
+    /// Pull-to-refresh for endpoints (shows progress in subtitle)
+    func refreshEndpoints() async {
+        isRefreshing = true
+        refreshProgress = 0
+        refreshLoadedCount = 0
+        refreshTotalCount = 0
+        errorMessage = nil
+        
+        do {
+            allHosts = try await apiClient.searchAndRetrieveHostsWithProgress(query: nil) { [weak self] loaded, total in
+                Task { @MainActor in
+                    self?.refreshLoadedCount = loaded
+                    self?.refreshTotalCount = total
+                    self?.refreshProgress = total > 0 ? Double(loaded) / Double(total) : 0
+                }
+            }
+            lastRefresh = Date()
+            applyLocalFilter()
+            saveCachedData()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+        
+        isRefreshing = false
+        refreshProgress = 0
     }
     
     /// Fetches alerts from the API with progress
@@ -198,6 +314,7 @@ class HostsViewModel {
                     self?.alertLoadingProgress = total > 0 ? Double(loaded) / Double(total) : 0
                 }
             }
+            saveCachedData()
         } catch URLError.cancelled {
             print("Alert fetch cancelled - likely user navigated away")
         } catch {
@@ -206,6 +323,17 @@ class HostsViewModel {
         
         isLoadingAlerts = false
         alertLoadingProgress = 0
+    }
+    
+    /// Pull-to-refresh for alerts only
+    func refreshAlertsOnly() async {
+        isLoadingAlerts = true
+        alertLoadingProgress = 0
+        alertLoadedCount = 0
+        alertTotalCount = 0
+        errorMessage = nil
+        
+        await refreshAlerts()
     }
     
     /// Load hosts - uses cached data if available, otherwise fetches
@@ -222,6 +350,13 @@ class HostsViewModel {
         applyLocalFilter()
     }
     
+    /// Clear all filters
+    func clearFilters() {
+        selectedStatuses = []
+        selectedPlatforms = []
+        searchQuery = ""
+    }
+    
     /// Apply local search filter to cached hosts
     private func applyLocalFilter() {
         var filtered = allHosts
@@ -232,6 +367,26 @@ class HostsViewModel {
             filtered = filtered.filter { host in
                 guard let lastSeen = host.lastSeenDate else { return false }
                 return lastSeen >= cutoffDate
+            }
+        }
+        
+        // Apply status filter
+        if !selectedStatuses.isEmpty {
+            filtered = filtered.filter { host in
+                guard let status = host.status?.lowercased() else { return false }
+                return selectedStatuses.contains { filterStatus in
+                    status == filterStatus.rawValue
+                }
+            }
+        }
+        
+        // Apply platform filter
+        if !selectedPlatforms.isEmpty {
+            filtered = filtered.filter { host in
+                guard let platform = host.platformName?.lowercased() else { return false }
+                return selectedPlatforms.contains { filterPlatform in
+                    platform.contains(filterPlatform.searchTerm)
+                }
             }
         }
         
@@ -273,8 +428,15 @@ class HostsViewModel {
             hosts = []
             allAlerts = []
             searchQuery = ""
+            selectedStatuses = []
+            selectedPlatforms = []
             errorMessage = nil
             lastRefresh = nil
+            
+            // Clear cached files
+            try? fileManager.removeItem(at: hostsCacheURL)
+            try? fileManager.removeItem(at: alertsCacheURL)
+            try? fileManager.removeItem(at: lastRefreshURL)
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -289,3 +451,74 @@ class HostsViewModel {
         }
     }
 }
+
+// MARK: - Filter Options
+
+enum EndpointStatus: String, CaseIterable, Identifiable {
+    case normal = "normal"
+    case offline = "offline"
+    case containment = "containment"
+    case sensorDisabled = "sensor_disabled"
+    
+    var id: String { rawValue }
+    
+    var displayName: String {
+        switch self {
+        case .normal: return "Normal"
+        case .offline: return "Offline"
+        case .containment: return "Containment"
+        case .sensorDisabled: return "Sensor Disabled"
+        }
+    }
+    
+    var icon: String {
+        switch self {
+        case .normal: return "checkmark.circle.fill"
+        case .offline: return "moon.zzz.fill"
+        case .containment: return "exclamationmark.shield.fill"
+        case .sensorDisabled: return "xmark.circle.fill"
+        }
+    }
+    
+    var color: String {
+        switch self {
+        case .normal: return "green"
+        case .offline: return "orange"
+        case .containment: return "red"
+        case .sensorDisabled: return "red"
+        }
+    }
+}
+
+enum EndpointPlatform: String, CaseIterable, Identifiable {
+    case windows
+    case mac
+    case linux
+    
+    var id: String { rawValue }
+    
+    var displayName: String {
+        switch self {
+        case .windows: return "Windows"
+        case .mac: return "macOS"
+        case .linux: return "Linux"
+        }
+    }
+    
+    var searchTerm: String {
+        switch self {
+        case .windows: return "windows"
+        case .mac: return "mac"
+        case .linux: return "linux"
+        }
+    }
+    
+    var icon: String {
+        switch self {
+        case .windows: return "pc"
+        case .mac: return "desktopcomputer"
+        case .linux: return "server.rack"
+        }
+    }
+}
+

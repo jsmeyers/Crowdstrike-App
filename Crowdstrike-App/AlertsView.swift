@@ -2,16 +2,63 @@ import SwiftUI
 
 struct AlertsView: View {
     let rawAlerts: [Alert]
+    var lastRefresh: Date?
+    var isRefreshing: Bool = false
+    var refreshLoadedCount: Int = 0
+    var refreshTotalCount: Int = 0
+    var onRefresh: () async -> Void
     
     var body: some View {
         List {
-            ForEach(rawAlerts) { alert in
-                NavigationLink(value: alert) {
-                    AlertRow(alert: alert)
+            // Refresh status header
+            if isRefreshing {
+                Section {
+                    HStack {
+                        ProgressView()
+                            .controlSize(.small)
+                        Spacer()
+                        if refreshTotalCount > 0 {
+                            Text("Refreshing... \(refreshLoadedCount) of \(refreshTotalCount)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Text("Refreshing...")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                    }
+                }
+            }
+            
+            Section {
+                ForEach(rawAlerts) { alert in
+                    NavigationLink(value: alert) {
+                        AlertRow(alert: alert)
+                    }
+                }
+            } footer: {
+                if !rawAlerts.isEmpty {
+                    HStack {
+                        Spacer()
+                        Text("\(rawAlerts.count) alerts")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        if let lastRefresh = lastRefresh {
+                            Text("• Updated \(lastRefresh.timeAgoString())")
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                        }
+                        Spacer()
+                    }
+                    .padding(.vertical, 4)
                 }
             }
         }
         .listStyle(.plain)
+        .refreshable {
+            await onRefresh()
+        }
         .navigationDestination(for: Alert.self) { alert in
             AlertDetailView(alert: alert)
         }
@@ -90,6 +137,7 @@ struct AlertRow: View {
         }
     }
 }
+
 struct AlertDetailView: View {
     let alert: Alert
     

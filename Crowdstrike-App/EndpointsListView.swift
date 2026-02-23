@@ -2,18 +2,85 @@ import SwiftUI
 
 struct EndpointsListView: View {
     let hosts: [Host]
-    @Binding var searchQuery: String
+    var onSearchQueryChange: (String) -> Void
+    var totalCount: Int = 0
+    var isFilterActive: Bool = false
+    var lastRefresh: Date?
+    var isRefreshing: Bool = false
+    var refreshLoadedCount: Int = 0
+    var refreshTotalCount: Int = 0
+    var onRefresh: () async -> Void
+    
+    @State private var searchText = ""
+    @State private var searchDebounceTask: Task<Void, Never>?
     
     var body: some View {
         List {
-            ForEach(hosts) { host in
-                NavigationLink(value: host) {
-                    HostRow(host: host)
+            // Refresh status header
+            if isRefreshing {
+                Section {
+                    HStack {
+                        ProgressView()
+                            .controlSize(.small)
+                        Spacer()
+                        if refreshTotalCount > 0 {
+                            Text("Refreshing... \(refreshLoadedCount) of \(refreshTotalCount)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Text("Refreshing...")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                    }
+                }
+            }
+            
+            Section {
+                ForEach(hosts) { host in
+                    NavigationLink(value: host) {
+                        HostRow(host: host)
+                    }
+                }
+            } footer: {
+                if totalCount > 0 {
+                    HStack {
+                        Spacer()
+                        Text("\(hosts.count) of \(totalCount) endpoints")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        if let lastRefresh = lastRefresh {
+                            Text("• Updated \(lastRefresh.timeAgoString())")
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                        }
+                        Spacer()
+                    }
+                    .padding(.vertical, 4)
                 }
             }
         }
         .listStyle(.plain)
-        .searchable(text: $searchQuery, prompt: "Search endpoints...")
+        .refreshable {
+            await onRefresh()
+        }
+        .searchable(text: $searchText, prompt: "Search endpoints...")
+        .onChange(of: searchText) { _, newValue in
+            // Cancel previous debounce task
+            searchDebounceTask?.cancel()
+            
+            // Create new debounced task
+            searchDebounceTask = Task {
+                try? await Task.sleep(nanoseconds: 300_000_000) // 300ms
+                if !Task.isCancelled {
+                    onSearchQueryChange(newValue)
+                }
+            }
+        }
+        .onDisappear {
+            searchDebounceTask?.cancel()
+        }
         .navigationDestination(for: Host.self) { host in
             HostDetailView(host: host)
         }
