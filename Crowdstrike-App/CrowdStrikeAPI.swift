@@ -9,7 +9,7 @@ import Foundation
 
 // MARK: - API Configuration
 
-enum CrowdStrikeRegion: String, CaseIterable, Identifiable, Codable {
+enum CrowdStrikeRegion: String, CaseIterable, Identifiable, Codable, Sendable {
     case us1 = "api.crowdstrike.com"
     case us2 = "api.us-2.crowdstrike.com"
     case eu1 = "api.eu-1.crowdstrike.com"
@@ -29,7 +29,7 @@ enum CrowdStrikeRegion: String, CaseIterable, Identifiable, Codable {
 
 // MARK: - OAuth Token Response
 
-struct OAuthTokenResponse: Codable {
+nonisolated struct OAuthTokenResponse: Codable, Sendable {
     let accessToken: String?
     let expiresIn: Int?
     let tokenType: String?
@@ -43,7 +43,7 @@ struct OAuthTokenResponse: Codable {
 
 // MARK: - Host Models
 
-struct Host: Identifiable, Codable, Hashable {
+nonisolated struct Host: Identifiable, Codable, Hashable, Sendable {
     let id: String
     let hostname: String?
     let localIp: String?
@@ -174,6 +174,28 @@ struct Host: Identifiable, Codable, Hashable {
         self.tags = nil
     }
     
+    /// Derives a stable identifier for a Host when `device_id` is missing, so
+    /// distinct broken records don't collapse to a single `"unknown"` ID
+    /// (which would break `Identifiable`/`Hashable` in SwiftUI lists and cause
+    /// duplicate-row glitches). The value is content-derived so it stays
+    /// stable across decodes/launches for the same record.
+    private static func fallbackIdentifier(
+        hostname: String?,
+        localIp: String?,
+        externalIp: String?,
+        macAddress: String?,
+        firstSeen: String?
+    ) -> String {
+        let parts = [hostname, localIp, externalIp, macAddress, firstSeen]
+            .compactMap { $0?.isEmpty == false ? $0 : nil }
+        if parts.isEmpty {
+            // Degenerate case: nothing to derive from. Use a UUID so at least
+            // multiple such records don't collide within a session.
+            return "unknown-\(UUID().uuidString)"
+        }
+        return "unknown:" + parts.joined(separator: "|")
+    }
+    
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         
@@ -182,7 +204,18 @@ struct Host: Identifiable, Codable, Hashable {
         } else if let deviceIdInt = try? container.decode(Int.self, forKey: .id) {
             id = String(deviceIdInt)
         } else {
-            id = "unknown"
+            // Derive a stable fallback from identifying fields so duplicate
+            // "unknown" IDs don't collapse distinct records. Re-decoding here
+            // is cheap and only runs on the rare missing-id path.
+            let hn = try? container.decodeIfPresent(String.self, forKey: .hostname)
+            let lip = try? container.decodeIfPresent(String.self, forKey: .localIp)
+            let eip = try? container.decodeIfPresent(String.self, forKey: .externalIp)
+            let mac = try? container.decodeIfPresent(String.self, forKey: .macAddress)
+            let fs = try? container.decodeIfPresent(String.self, forKey: .firstSeen)
+            id = Self.fallbackIdentifier(
+                hostname: hn, localIp: lip, externalIp: eip,
+                macAddress: mac, firstSeen: fs
+            )
         }
         
         hostname = try container.decodeIfPresent(String.self, forKey: .hostname)
@@ -281,27 +314,65 @@ struct Host: Identifiable, Codable, Hashable {
     
     var displayName: String { hostname ?? "Unknown Host" }
     
+    /// Lowercased searchable field values for this host. Used to precompute a
+    /// search index in the view model so filtering doesn't allocate ~15
+    /// `lowercased()` strings per host on every keystroke.
+    var searchableFields: [String] {
+        var fields: [String] = []
+        fields.append(displayName.lowercased())
+        if let hostname { fields.append(hostname.lowercased()) }
+        if let localIp { fields.append(localIp.lowercased()) }
+        if let externalIp { fields.append(externalIp.lowercased()) }
+        if let platformName { fields.append(platformName.lowercased()) }
+        if let osProductName { fields.append(osProductName.lowercased()) }
+        if let osVersion { fields.append(osVersion.lowercased()) }
+        if let machineDomain { fields.append(machineDomain.lowercased()) }
+        if let siteName { fields.append(siteName.lowercased()) }
+        if let lastLoginUser { fields.append(lastLoginUser.lowercased()) }
+        if let systemManufacturer { fields.append(systemManufacturer.lowercased()) }
+        if let systemProductName { fields.append(systemProductName.lowercased()) }
+        if let serialNumber { fields.append(serialNumber.lowercased()) }
+        if let status { fields.append(status.lowercased()) }
+        if let agentVersion { fields.append(agentVersion.lowercased()) }
+        if let tags { fields.append(contentsOf: tags.map { $0.lowercased() }) }
+        if let groupIds { fields.append(contentsOf: groupIds.map { $0.lowercased() }) }
+        return fields
+    }
+    
+    // MARK: - Shared Date Formatters
+    
+    /// Formatter that accepts fractional seconds. ISO8601DateFormatter is thread-safe,
+    /// so a single shared instance avoids per-row allocation during decode/display.
+    private static let iso8601WithFractional: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+    
+    private static let iso8601WithoutFractional: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter
+    }()
+    
+    private static func parseISO8601Date(_ string: String) -> Date? {
+        if let date = iso8601WithFractional.date(from: string) { return date }
+        return iso8601WithoutFractional.date(from: string)
+    }
+    
     var lastSeenDate: Date? {
         guard let lastSeen = lastSeen else { return nil }
-        return parseISO8601Date(lastSeen)
+        return Self.parseISO8601Date(lastSeen)
     }
     
     var firstSeenDate: Date? {
         guard let firstSeen = firstSeen else { return nil }
-        return parseISO8601Date(firstSeen)
+        return Self.parseISO8601Date(firstSeen)
     }
     
     var lastLoginDate: Date? {
         guard let lastLoginTimestamp = lastLoginTimestamp else { return nil }
-        return parseISO8601Date(lastLoginTimestamp)
-    }
-    
-    private func parseISO8601Date(_ string: String) -> Date? {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = formatter.date(from: string) { return date }
-        formatter.formatOptions = [.withInternetDateTime]
-        return formatter.date(from: string)
+        return Self.parseISO8601Date(lastLoginTimestamp)
     }
     
     var lastSeenAgo: String? {
@@ -322,7 +393,7 @@ struct Host: Identifiable, Codable, Hashable {
 
 // MARK: - HostGroup
 
-struct HostGroup: Codable, Hashable {
+nonisolated struct HostGroup: Codable, Hashable, Sendable {
     let id: String?
     let name: String?
     
@@ -345,7 +416,7 @@ struct HostGroup: Codable, Hashable {
 
 // MARK: - Alert Device (nested in Alert response)
 
-struct AlertDevice: Codable {
+nonisolated struct AlertDevice: Codable, Sendable {
     let deviceId: String?
     let hostname: String?
     let localIp: String?
@@ -403,7 +474,7 @@ struct AlertDevice: Codable {
 
 // MARK: - Alert Process Details
 
-struct AlertProcessDetails: Codable {
+nonisolated struct AlertProcessDetails: Codable, Sendable {
     let sha256: String?
     let md5: String?
     let filename: String?
@@ -431,7 +502,7 @@ struct AlertProcessDetails: Codable {
 
 // MARK: - Alert Model
 
-struct Alert: Identifiable, Codable, Hashable {
+nonisolated struct Alert: Identifiable, Codable, Hashable, Sendable {
     let id: String
     let name: String?
     let description: String?
@@ -566,6 +637,26 @@ struct Alert: Identifiable, Codable, Hashable {
         case agentId = "agent_id"
     }
     
+    /// Derives a stable identifier for an Alert when both `composite_id` and
+    /// `id` are missing, so distinct broken records don't collapse to a single
+    /// `"unknown"` ID (which would break `Identifiable`/`Hashable` in SwiftUI).
+    private static func fallbackIdentifier(
+        name: String?,
+        createdTime: String?,
+        deviceId: String?,
+        severity: Int?
+    ) -> String {
+        var parts: [String] = []
+        if let name, !name.isEmpty { parts.append(name) }
+        if let createdTime, !createdTime.isEmpty { parts.append(createdTime) }
+        if let deviceId, !deviceId.isEmpty { parts.append(deviceId) }
+        if let severity { parts.append(String(severity)) }
+        if parts.isEmpty {
+            return "unknown-\(UUID().uuidString)"
+        }
+        return "unknown:" + parts.joined(separator: "|")
+    }
+    
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         
@@ -578,7 +669,17 @@ struct Alert: Identifiable, Codable, Hashable {
         } else if let idInt = try? container.decode(Int.self, forKey: .id) {
             id = String(idInt)
         } else {
-            id = "unknown"
+            // Derive a stable fallback so duplicate "unknown" IDs don't collapse
+            // distinct records. Re-decoding here is cheap and only runs on the
+            // rare missing-id path.
+            let n = try? container.decodeIfPresent(String.self, forKey: .name)
+            let ct = try? container.decodeIfPresent(String.self, forKey: .createdTime)
+            let dev = try? container.decodeIfPresent(AlertDevice.self, forKey: .device)
+            let sev = try? container.decodeIfPresent(Int.self, forKey: .severity)
+            id = Self.fallbackIdentifier(
+                name: n, createdTime: ct,
+                deviceId: dev?.deviceId, severity: sev
+            )
         }
         
         agentId = try container.decodeIfPresent(String.self, forKey: .agentId)
@@ -672,32 +773,43 @@ struct Alert: Identifiable, Codable, Hashable {
     var platform: String? { device?.platformName }
     var osVersion: String? { device?.osVersion }
     
+    // MARK: - Shared Date Formatters
+    
+    private static let iso8601WithFractional: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+    
+    private static let iso8601WithoutFractional: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter
+    }()
+    
+    private static func parseISO8601Date(_ string: String) -> Date? {
+        if let date = iso8601WithFractional.date(from: string) { return date }
+        return iso8601WithoutFractional.date(from: string)
+    }
+    
     var createdDate: Date? {
         guard let createdTime = createdTime else { return nil }
-        return parseISO8601Date(createdTime)
+        return Self.parseISO8601Date(createdTime)
     }
     
     var updatedDate: Date? {
         guard let updatedTime = updatedTime else { return nil }
-        return parseISO8601Date(updatedTime)
+        return Self.parseISO8601Date(updatedTime)
     }
     
     var startDate: Date? {
         guard let startTime = startTime else { return nil }
-        return parseISO8601Date(startTime)
+        return Self.parseISO8601Date(startTime)
     }
     
     var endDate: Date? {
         guard let endTime = endTime else { return nil }
-        return parseISO8601Date(endTime)
-    }
-    
-    private func parseISO8601Date(_ string: String) -> Date? {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = formatter.date(from: string) { return date }
-        formatter.formatOptions = [.withInternetDateTime]
-        return formatter.date(from: string)
+        return Self.parseISO8601Date(endTime)
     }
     
     var createdAgo: String? {
@@ -810,33 +922,50 @@ struct Alert: Identifiable, Codable, Hashable {
     }
 }
 
+// MARK: - Alert Helpers
+
+nonisolated extension Alert {
+    /// Returns true if the composite ID indicates a third-party-sourced alert.
+    ///
+    /// CrowdStrike embeds `:thirdparty:` in composite IDs for alerts sourced
+    /// from integrations rather than native Falcon detections. This is used to
+    /// filter those out when the user only wants to see native detections.
+    ///
+    /// Note: this is a client-side heuristic based on the documented ID format.
+    /// If CrowdStrike changes the format, this helper is the single place to
+    /// update.
+    static func isThirdPartyAlertId(_ id: String) -> Bool {
+        id.contains(":thirdparty:")
+    }
+}
+
 // MARK: - API Response Models
 
-struct HostsResponse: Codable {
+nonisolated struct HostsResponse: Codable, Sendable {
     let resources: [String]?
     let meta: ResponseMeta?
     let errors: [APIErrorDetail]?
 }
 
-struct HostDetailsResponse: Codable {
+nonisolated struct HostDetailsResponse: Codable, Sendable {
     let resources: [Host]?
     let meta: ResponseMeta?
     let errors: [APIErrorDetail]?
 }
 
-struct AlertsResponse: Codable {
+nonisolated struct AlertsResponse: Codable, Sendable {
     let resources: [String]?
     let meta: ResponseMeta?
     let errors: [APIErrorDetail]?
 }
 
-struct AlertDetailsResponse: Codable {
+nonisolated struct AlertDetailsResponse: Codable, Sendable {
     let resources: [Alert]?
     let meta: ResponseMeta?
     let errors: [APIErrorDetail]?
 }
 
-struct ResponseMeta: Codable {
+nonisolated struct ResponseMeta: Codable, Sendable {
     let queryTime: Double?
     let pagination: Pagination?
     let poweredBy: String?
@@ -850,13 +979,13 @@ struct ResponseMeta: Codable {
     }
 }
 
-struct Pagination: Codable {
+nonisolated struct Pagination: Codable, Sendable {
     let total: Int?
     let offset: Int?
     let limit: Int?
 }
 
-struct APIErrorDetail: Codable {
+nonisolated struct APIErrorDetail: Codable, Sendable {
     let code: Int?
     let message: String?
     let id: String?
@@ -864,7 +993,7 @@ struct APIErrorDetail: Codable {
 
 // MARK: - API Error Type
 
-enum APIErrorType: Error, LocalizedError {
+nonisolated enum APIErrorType: Error, LocalizedError, Sendable {
     case notAuthenticated
     case authenticationFailed(statusCode: Int, message: String)
     case invalidResponse
@@ -900,6 +1029,20 @@ actor CrowdStrikeAPIClient {
     private var accessToken: String?
     private var tokenExpiration: Date?
     
+    /// Coalesces concurrent token-refresh attempts so multiple in-flight requests
+    /// don't each trigger a separate `authenticate` call.
+    private var tokenRefreshTask: Task<Void, Error>?
+    
+    /// Cached URLSession. Reused across requests; invalidated/recreated when the
+    /// configuration changes (proxy, timeouts). Creating a session per request is
+    /// expensive because it spins up connection pools and proxy evaluation.
+    private var cachedURLSession: URLSession?
+    
+    /// Proxy credentials fetched from the keychain during `updateConfiguration`.
+    /// Stored here so the synchronous `createURLSession` can use them without
+    /// needing to await keychain access on every session build.
+    private var proxyCredentials: (username: String, password: String)?
+    
     private let keychain = KeychainManager.shared
     
     /// Set to true to log raw API responses to the console for debugging
@@ -909,11 +1052,24 @@ actor CrowdStrikeAPIClient {
     
     // MARK: - Configuration
     
-    func updateConfiguration(_ config: AppConfiguration) {
+    func updateConfiguration(_ config: AppConfiguration) async {
         self.configuration = config
         self.shouldLogResponses = config.isDebugModeEnabled
         accessToken = nil
         tokenExpiration = nil
+        // Drop the cached session so the next request builds one with the new
+        // proxy/timeout settings. Let any in-flight tasks finish naturally.
+        cachedURLSession?.finishTasksAndInvalidate()
+        cachedURLSession = nil
+        
+        // Fetch proxy credentials from the keychain if proxy auth is enabled.
+        // This keeps secrets out of UserDefaults (where AppConfiguration lives)
+        // and makes them available to the synchronous createURLSession().
+        if config.proxy.isEnabled && config.proxy.requiresAuth {
+            self.proxyCredentials = try? await keychain.retrieveProxyCredentials()
+        } else {
+            self.proxyCredentials = nil
+        }
     }
     
     func getConfiguration() -> AppConfiguration {
@@ -944,9 +1100,9 @@ actor CrowdStrikeAPIClient {
                 "HTTPSPort": proxyPort
             ]
             
-            if configuration.proxy.requiresAuth {
-                proxyDict["HTTPUser"] = configuration.proxy.username
-                proxyDict["HTTPPass"] = configuration.proxy.password
+            if configuration.proxy.requiresAuth, let creds = proxyCredentials {
+                proxyDict["HTTPUser"] = creds.username
+                proxyDict["HTTPPass"] = creds.password
             }
             
             sessionConfig.connectionProxyDictionary = proxyDict
@@ -955,7 +1111,57 @@ actor CrowdStrikeAPIClient {
         return URLSession(configuration: sessionConfig)
     }
     
+    /// Returns the cached session, creating it lazily on first use.
+    private func urlSession() -> URLSession {
+        if let cachedURLSession { return cachedURLSession }
+        let new = createURLSession()
+        cachedURLSession = new
+        return new
+    }
+    
+    // MARK: - Proxy Credentials Management
+    
+    /// Stores proxy credentials in the keychain and refreshes the cached values.
+    /// Call this from the UI when the user edits proxy auth settings.
+    func setProxyCredentials(username: String, password: String) async throws {
+        try await keychain.storeProxyCredentials(username: username, password: password)
+        self.proxyCredentials = (username, password)
+        // Invalidate the cached session so the next request rebuilds with new creds
+        cachedURLSession?.finishTasksAndInvalidate()
+        cachedURLSession = nil
+    }
+    
+    /// Removes proxy credentials from the keychain and clears the cached values.
+    func clearProxyCredentials() async throws {
+        try await keychain.deleteProxyCredentials()
+        self.proxyCredentials = nil
+        cachedURLSession?.finishTasksAndInvalidate()
+        cachedURLSession = nil
+    }
+    
+    // MARK: - Auth State Management
+    
+    /// Clears in-memory auth state and any in-flight token refresh. Called on
+    /// logout so the client drops the access token immediately rather than
+    /// waiting for the next `ensureValidToken` to discover missing keychain
+    /// credentials.
+    func clearAuthState() {
+        accessToken = nil
+        tokenExpiration = nil
+        tokenRefreshTask?.cancel()
+        tokenRefreshTask = nil
+    }
+    
     // MARK: - Helper Methods
+    
+    /// Returns a non-optional `Authorization` header value, throwing if no valid
+    /// token is present. Replaces force-unwrapped `accessToken!` usage at call sites.
+    private func authorizationHeader() throws -> String {
+        guard let token = accessToken, !token.isEmpty else {
+            throw APIErrorType.notAuthenticated
+        }
+        return "Bearer \(token)"
+    }
     
     /// Properly encodes an FQL filter string for use in a URL query parameter.
     /// The + character (AND operator in FQL) must be encoded as %2B, otherwise
@@ -992,6 +1198,16 @@ actor CrowdStrikeAPIClient {
         print(String(repeating: "=", count: 80) + "\n")
     }
     
+    /// Logs any `errors` entries returned in a 200 response body. CrowdStrike can
+    /// return HTTP 200 with a populated `errors` array, so this surfaces them
+    /// instead of silently ignoring partial failures.
+    private func logResponseErrors(_ errors: [APIErrorDetail]?, context: String) {
+        guard let errors, !errors.isEmpty else { return }
+        for error in errors {
+            print("⚠️ API Error [\(context)] code=\(error.code ?? -1) id=\(error.id ?? "nil"): \(error.message ?? "no message")")
+        }
+    }
+    
     // MARK: - Authentication
     
     func authenticate(clientId: String, clientSecret: String) async throws {
@@ -1000,10 +1216,18 @@ actor CrowdStrikeAPIClient {
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
         request.timeoutInterval = configuration.connectionTimeout
         
-        let body = "client_id=\(clientId)&client_secret=\(clientSecret)"
+        // Percent-encode each value so a client ID/secret containing reserved
+        // characters (e.g. &, =) doesn't corrupt the form body.
+        let encodedClientId = clientId.addingPercentEncoding(
+            withAllowedCharacters: .urlQueryAllowed
+        ) ?? clientId
+        let encodedSecret = clientSecret.addingPercentEncoding(
+            withAllowedCharacters: .urlQueryAllowed
+        ) ?? clientSecret
+        let body = "client_id=\(encodedClientId)&client_secret=\(encodedSecret)"
         request.httpBody = body.data(using: .utf8)
         
-        let session = createURLSession()
+        let session = urlSession()
         let (data, response) = try await session.data(for: request)
         
         logResponse(data, label: "OAuth Token Response")
@@ -1047,9 +1271,9 @@ actor CrowdStrikeAPIClient {
         return try? await keychain.retrieveBearerToken()
     }
     
-    private func ensureValidToken() async throws {
-        if isAuthenticated() { return }
-        
+    /// Refreshes the access token using the configured auth method. Called by
+    /// `ensureValidToken`, which coalesces concurrent callers onto a single refresh.
+    private func refreshToken() async throws {
         switch configuration.authMethod {
         case .oauth:
             if let (clientId, clientSecret) = try? await keychain.retrieveCredentials() {
@@ -1067,6 +1291,24 @@ actor CrowdStrikeAPIClient {
                 throw APIErrorType.notAuthenticated
             }
         }
+    }
+    
+    private func ensureValidToken() async throws {
+        if isAuthenticated() { return }
+        
+        // If a refresh is already in flight, await it instead of starting another.
+        if let existing = tokenRefreshTask {
+            try await existing.value
+            return
+        }
+        
+        let task = Task<Void, Error> { [weak self] in
+            guard let self else { throw APIErrorType.notAuthenticated }
+            try await self.refreshToken()
+        }
+        tokenRefreshTask = task
+        defer { tokenRefreshTask = nil }
+        try await task.value
     }
     
     // MARK: - Hosts API
@@ -1087,10 +1329,10 @@ actor CrowdStrikeAPIClient {
         guard let url = URL(string: urlString) else { throw APIErrorType.invalidResponse }
         
         var request = URLRequest(url: url)
-        request.setValue("Bearer \(accessToken!)", forHTTPHeaderField: "Authorization")
+        request.setValue(try authorizationHeader(), forHTTPHeaderField: "Authorization")
         request.timeoutInterval = configuration.requestTimeout
         
-        let session = createURLSession()
+        let session = urlSession()
         let (data, response) = try await session.data(for: request)
         
         logResponse(data, label: "Host Search Response")
@@ -1103,6 +1345,7 @@ actor CrowdStrikeAPIClient {
         }
         
         let hostsResponse = try JSONDecoder().decode(HostsResponse.self, from: data)
+        logResponseErrors(hostsResponse.errors, context: "Host Search")
         return (hostsResponse.resources ?? [], hostsResponse.meta?.pagination?.offset, hostsResponse.meta?.pagination?.total)
     }
     
@@ -1116,10 +1359,10 @@ actor CrowdStrikeAPIClient {
         guard let url = urlComponents.url else { throw APIErrorType.invalidResponse }
         
         var request = URLRequest(url: url)
-        request.setValue("Bearer \(accessToken!)", forHTTPHeaderField: "Authorization")
+        request.setValue(try authorizationHeader(), forHTTPHeaderField: "Authorization")
         request.timeoutInterval = configuration.requestTimeout
         
-        let session = createURLSession()
+        let session = urlSession()
         let (data, response) = try await session.data(for: request)
         
         logResponse(data, label: "Host Details Response (\(hostIds.count) hosts)")
@@ -1131,7 +1374,14 @@ actor CrowdStrikeAPIClient {
             )
         }
         
-        return (try? JSONDecoder().decode(HostDetailsResponse.self, from: data).resources) ?? []
+        logResponseErrors((try? JSONDecoder().decode(HostDetailsResponse.self, from: data).errors), context: "Host Details")
+        
+        do {
+            return try JSONDecoder().decode(HostDetailsResponse.self, from: data).resources ?? []
+        } catch {
+            // Surface decode failures instead of silently returning [].
+            throw APIErrorType.decodingError(error)
+        }
     }
     
     func searchAndRetrieveHostsWithProgress(query: String?, progressHandler: @escaping (Int, Int) -> Void) async throws -> [Host] {
@@ -1145,9 +1395,9 @@ actor CrowdStrikeAPIClient {
         
         guard let countUrl = URL(string: countUrlString) else { throw APIErrorType.invalidResponse }
         var countRequest = URLRequest(url: countUrl)
-        countRequest.setValue("Bearer \(accessToken!)", forHTTPHeaderField: "Authorization")
+        countRequest.setValue(try authorizationHeader(), forHTTPHeaderField: "Authorization")
         
-        let session = createURLSession()
+        let session = urlSession()
         let (countData, countResponse) = try await session.data(for: countRequest)
         
         guard let httpResponse = countResponse as? HTTPURLResponse, httpResponse.statusCode == 200 else {
@@ -1157,6 +1407,7 @@ actor CrowdStrikeAPIClient {
         }
         
         let initialResponse = try JSONDecoder().decode(HostsResponse.self, from: countData)
+        logResponseErrors(initialResponse.errors, context: "Host Count")
         let totalCount = initialResponse.meta?.pagination?.total ?? 0
         
         print("Total host count: \(totalCount)")
@@ -1168,11 +1419,16 @@ actor CrowdStrikeAPIClient {
         var currentOffset: Int? = nil
         let limit = 500
         
+        // ID fetching represents roughly the first half of progress.
+        let halfTotal = totalCount / 2
+        
         while true {
+            try Task.checkCancellation()
             let (hostIds, nextOffset, _) = try await searchHostsPage(query: query, offset: currentOffset, limit: limit)
             allHostIds.append(contentsOf: hostIds)
             currentOffset = nextOffset
-            progressHandler(min(allHostIds.count, totalCount / 2), totalCount)
+            // Report 0–50% during the ID-fetch phase.
+            progressHandler(min(allHostIds.count, halfTotal), totalCount)
             
             if nextOffset == nil || hostIds.isEmpty {
                 break
@@ -1183,14 +1439,18 @@ actor CrowdStrikeAPIClient {
         
         var allHosts: [Host] = []
         let batchSize = 100
+        let detailDenominator = max(allHostIds.count, 1)
         
         for i in stride(from: 0, to: allHostIds.count, by: batchSize) {
+            try Task.checkCancellation()
             let batchEnd = min(i + batchSize, allHostIds.count)
             let batchIds = Array(allHostIds[i..<batchEnd])
             
             let hosts = try await getHostDetailsBatch(hostIds: batchIds)
             allHosts.append(contentsOf: hosts)
-            progressHandler(batchEnd, totalCount)
+            // Report 50–100% during the detail-fetch phase, scaled by batch progress.
+            let detailProgress = halfTotal + Int((Double(batchEnd) / Double(detailDenominator)) * Double(halfTotal))
+            progressHandler(detailProgress, totalCount)
         }
         
         print("Total hosts retrieved: \(allHosts.count)")
@@ -1198,6 +1458,39 @@ actor CrowdStrikeAPIClient {
     }
     
     // MARK: - Alerts API
+    
+    /// Queries a single page of alert IDs for the given FQL filter.
+    private func queryAlertIdsPage(filterString: String, limit: Int, offset: Int?) async throws -> (ids: [String], nextOffset: Int?, total: Int?) {
+        try await ensureValidToken()
+        
+        var urlString = "\(configuration.baseURLWithProtocol)/alerts/queries/alerts/v2?limit=\(limit)&filter=\(encodeFQLFilter(filterString))"
+        if let offset {
+            urlString += "&offset=\(offset)"
+        }
+        
+        guard let url = URL(string: urlString) else { throw APIErrorType.invalidResponse }
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue(try authorizationHeader(), forHTTPHeaderField: "Authorization")
+        request.timeoutInterval = configuration.requestTimeout
+        
+        let session = urlSession()
+        let (data, response) = try await session.data(for: request)
+        
+        logResponse(data, label: "Alerts Query Response (offset=\(offset ?? 0))")
+        
+        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+            throw APIErrorType.requestFailed(
+                statusCode: (response as? HTTPURLResponse)?.statusCode ?? 0,
+                message: String(data: data, encoding: .utf8) ?? "Unknown error"
+            )
+        }
+        
+        let alertsResponse = try JSONDecoder().decode(AlertsResponse.self, from: data)
+        logResponseErrors(alertsResponse.errors, context: "Alerts Query")
+        return (alertsResponse.resources ?? [], alertsResponse.meta?.pagination?.offset, alertsResponse.meta?.pagination?.total)
+    }
     
     func fetchAlerts(limit: Int = 500, minSeverity: Int? = 55, since: Date? = nil, filterThirdParty: Bool = true, progressHandler: @escaping (Int, Int) -> Void = { _, _ in }) async throws -> [Alert] {
         try await ensureValidToken()
@@ -1207,7 +1500,7 @@ actor CrowdStrikeAPIClient {
         
         // Add severity filter (crowdStrike uses 0-100 scale in alerts API)
         // Note: severity is an integer field and must NOT be quoted
-        if let minSeverity = minSeverity {
+        if let minSeverity {
             filters.append("severity:>=\(minSeverity)")
         }
         
@@ -1222,52 +1515,45 @@ actor CrowdStrikeAPIClient {
         // Join filters with + (AND operator in FQL)
         let filterString = filters.joined(separator: "+")
         
-        // Build URL string manually with proper FQL encoding
-        let urlString = "\(configuration.baseURLWithProtocol)/alerts/queries/alerts/v2?limit=\(limit)&filter=\(encodeFQLFilter(filterString))"
+        print("Alerts API filter: \(filterString)")
         
-        guard let url = URL(string: urlString) else { throw APIErrorType.invalidResponse }
+        // Paginate through ALL alert IDs (previously only the first page was fetched).
+        var allAlertIds: [String] = []
+        var currentOffset: Int? = nil
+        var totalCount = 0
         
-        print("Alerts API URL: \(url.absoluteString)")
-        
-        var request = URLRequest(url: url)
-        request.httpMethod = "GET"
-        request.setValue("Bearer \(accessToken!)", forHTTPHeaderField: "Authorization")
-        request.timeoutInterval = configuration.requestTimeout
-        
-        let session = createURLSession()
-        let (data, response) = try await session.data(for: request)
-        
-        logResponse(data, label: "Alerts Query Response")
-        
-        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
-            throw APIErrorType.requestFailed(
-                statusCode: (response as? HTTPURLResponse)?.statusCode ?? 0,
-                message: String(data: data, encoding: .utf8) ?? "Unknown error"
-            )
+        while true {
+            try Task.checkCancellation()
+            let (ids, nextOffset, total) = try await queryAlertIdsPage(filterString: filterString, limit: limit, offset: currentOffset)
+            allAlertIds.append(contentsOf: ids)
+            if let total { totalCount = total }
+            currentOffset = nextOffset
+            print("Fetched alert ID page: \(ids.count) ids (running total: \(allAlertIds.count), reported total: \(totalCount))")
+            if nextOffset == nil || ids.isEmpty { break }
         }
         
-        let alertsResponse = try JSONDecoder().decode(AlertsResponse.self, from: data)
-        guard let alertIds = alertsResponse.resources, !alertIds.isEmpty else {
+        guard !allAlertIds.isEmpty else {
             print("No alert IDs returned")
             progressHandler(0, 0)
             return []
         }
         
-        print("Fetched \(alertIds.count) total alert IDs from API")
+        print("Fetched \(allAlertIds.count) total alert IDs from API")
         
-        // Filter out third-party alerts if user has selected that option
+        // Filter out third-party alerts if user has selected that option.
+        // Uses the documented `:thirdparty:` marker in composite IDs.
         let filteredIds: [String]
         if filterThirdParty {
-            let thirdPartyCount = alertIds.filter { $0.contains(":thirdparty:") }.count
-            filteredIds = alertIds.filter { !$0.contains(":thirdparty:") }
+            let thirdPartyCount = allAlertIds.filter { Alert.isThirdPartyAlertId($0) }.count
+            filteredIds = allAlertIds.filter { !Alert.isThirdPartyAlertId($0) }
             print("Filtering enabled: \(thirdPartyCount) third-party alerts removed, \(filteredIds.count) remaining")
         } else {
-            filteredIds = alertIds
+            filteredIds = allAlertIds
             print("Filtering disabled: keeping all \(filteredIds.count) alerts")
         }
         
-        let totalCount = filteredIds.count
-        progressHandler(0, totalCount)
+        let totalCountToFetch = filteredIds.count
+        progressHandler(0, totalCountToFetch)
         
         guard !filteredIds.isEmpty else {
             print("No non-third-party alerts to fetch")
@@ -1278,6 +1564,7 @@ actor CrowdStrikeAPIClient {
         let batchSize = 50
         var errorCount = 0
         var loggedFirstBatch = false
+        let session = urlSession()
         
         for i in stride(from: 0, to: filteredIds.count, by: batchSize) {
             try Task.checkCancellation()
@@ -1285,13 +1572,13 @@ actor CrowdStrikeAPIClient {
             let batchEnd = min(i + batchSize, filteredIds.count)
             let batchIds = Array(filteredIds[i..<batchEnd])
             
-            print("Fetching alert batch \(i/batchSize + 1): IDs \(i) to \(batchEnd)")
+            print("Fetching alert batch \(i / batchSize + 1): IDs \(i) to \(batchEnd)")
             
             let detailsUrl = URL(string: "\(configuration.baseURLWithProtocol)/alerts/entities/alerts/v2")!
             
             var detailsRequest = URLRequest(url: detailsUrl)
             detailsRequest.httpMethod = "POST"
-            detailsRequest.setValue("Bearer \(accessToken!)", forHTTPHeaderField: "Authorization")
+            detailsRequest.setValue(try authorizationHeader(), forHTTPHeaderField: "Authorization")
             detailsRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
             
             let body: [String: Any] = ["composite_ids": batchIds]
@@ -1312,6 +1599,7 @@ actor CrowdStrikeAPIClient {
                     let decoder = JSONDecoder()
                     do {
                         let alertDetailsResponse = try decoder.decode(AlertDetailsResponse.self, from: detailsData)
+                        logResponseErrors(alertDetailsResponse.errors, context: "Alert Details")
                         if let alerts = alertDetailsResponse.resources {
                             allAlerts.append(contentsOf: alerts)
                             print("Successfully decoded \(alerts.count) alerts in this batch")
@@ -1322,7 +1610,7 @@ actor CrowdStrikeAPIClient {
                         print("Failed to decode alert details: \(error)")
                         errorCount += 1
                     }
-                    progressHandler(batchEnd, totalCount)
+                    progressHandler(batchEnd, totalCountToFetch)
                 } else {
                     print("Alert details fetch returned status code: \(statusCode)")
                     if let responseString = String(data: detailsData, encoding: .utf8) {
@@ -1330,9 +1618,11 @@ actor CrowdStrikeAPIClient {
                     }
                     errorCount += 1
                 }
-            } catch URLError.cancelled {
+            } catch is CancellationError {
+                // Propagate cancellation cleanly so callers (and structured
+                // concurrency) can react to it instead of treating it as an error.
                 print("Alert fetch cancelled")
-                throw APIErrorType.networkError(URLError(.cancelled))
+                throw CancellationError()
             } catch {
                 print("Alert fetch error: \(error.localizedDescription)")
                 errorCount += 1
@@ -1340,7 +1630,7 @@ actor CrowdStrikeAPIClient {
         }
         
         // Client-side severity filter as fallback (in case API filter doesn't work as expected)
-        if let minSeverity = minSeverity {
+        if let minSeverity {
             let beforeCount = allAlerts.count
             allAlerts = allAlerts.filter { ($0.severity ?? 0) >= minSeverity }
             let filteredCount = beforeCount - allAlerts.count
@@ -1364,10 +1654,10 @@ actor CrowdStrikeAPIClient {
         guard let url = urlComponents.url else { throw APIErrorType.invalidResponse }
         
         var request = URLRequest(url: url)
-        request.setValue("Bearer \(accessToken!)", forHTTPHeaderField: "Authorization")
+        request.setValue(try authorizationHeader(), forHTTPHeaderField: "Authorization")
         request.timeoutInterval = configuration.connectionTimeout
         
-        let session = createURLSession()
+        let session = urlSession()
         let (_, response) = try await session.data(for: request)
         
         guard let httpResponse = response as? HTTPURLResponse else {
@@ -1379,7 +1669,7 @@ actor CrowdStrikeAPIClient {
 }
 
 // MARK: - Date Extension
-extension Date {
+nonisolated extension Date {
     func timeAgoString() -> String {
         let interval = Date().timeIntervalSince(self)
         return Date.timeAgoString(from: interval)

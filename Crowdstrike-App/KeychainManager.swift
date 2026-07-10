@@ -16,6 +16,8 @@ actor KeychainManager {
     private let clientIdKey = "clientId"
     private let clientSecretKey = "clientSecret"
     private let bearerTokenKey = "bearerToken"
+    private let proxyUsernameKey = "proxyUsername"
+    private let proxyPasswordKey = "proxyPassword"
     
     private init() {}
     
@@ -65,6 +67,30 @@ actor KeychainManager {
         return retrieve(key: bearerTokenKey) != nil
     }
     
+    // MARK: - Proxy Credentials
+    
+    func storeProxyCredentials(username: String, password: String) throws {
+        try store(key: proxyUsernameKey, value: username)
+        try store(key: proxyPasswordKey, value: password)
+    }
+    
+    func retrieveProxyCredentials() throws -> (username: String, password: String)? {
+        guard let username = retrieve(key: proxyUsernameKey),
+              let password = retrieve(key: proxyPasswordKey) else {
+            return nil
+        }
+        return (username, password)
+    }
+    
+    func deleteProxyCredentials() throws {
+        try delete(key: proxyUsernameKey)
+        try delete(key: proxyPasswordKey)
+    }
+    
+    func hasProxyCredentials() -> Bool {
+        return retrieve(key: proxyUsernameKey) != nil && retrieve(key: proxyPasswordKey) != nil
+    }
+    
     // MARK: - Storage Operations
     
     private func store(key: String, value: String) throws {
@@ -76,7 +102,12 @@ actor KeychainManager {
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: key,
-            kSecValueData as String: data
+            kSecValueData as String: data,
+            // Protect at rest and only allow access after the first unlock on this
+            // device (not included in backups, not synced to other devices via
+            // iCloud Keychain). This is appropriate for API credentials that the
+            // app needs in the background but that should not leave the device.
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
         ]
         
         SecItemDelete(query as CFDictionary)
@@ -92,7 +123,8 @@ actor KeychainManager {
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: key,
-            kSecReturnData as String: true
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne
         ]
         
         var result: AnyObject?
@@ -125,6 +157,7 @@ actor KeychainManager {
     func clearAll() throws {
         try deleteCredentials()
         try deleteBearerToken()
+        try deleteProxyCredentials()
     }
     
     // MARK: - Check Any Auth

@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import SwiftData
 
 @main
 struct Crowdstrike_AppApp: App {
@@ -13,5 +14,6 @@ struct Crowdstrike_AppApp: App {
         WindowGroup {
             ContentView()
         }
+        .modelContainer(for: [HostEntity.self, AlertEntity.self])
     }
 }

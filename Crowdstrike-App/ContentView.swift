@@ -16,7 +16,7 @@ struct ContentView: View {
                             ProgressView()
                                 .scaleEffect(1.2)
                             
-                            Text("Loading endpoints...")
+                            Text(viewModel.loadingMessage ?? "Loading endpoints...")
                                 .font(.headline)
                                 .foregroundStyle(.primary)
                             
@@ -55,18 +55,20 @@ struct ContentView: View {
                     } else {
                         EndpointsListView(
                             hosts: viewModel.hosts,
-                            onSearchQueryChange: { query in
-                                viewModel.searchQuery = query
-                            },
+                            searchQuery: $viewModel.searchQuery,
                             totalCount: viewModel.allHosts.count,
                             isFilterActive: viewModel.isFilterActive,
                             lastRefresh: viewModel.lastRefresh,
                             isRefreshing: viewModel.isRefreshing,
                             refreshLoadedCount: viewModel.refreshLoadedCount,
-                            refreshTotalCount: viewModel.refreshTotalCount
-                        ) {
-                            await viewModel.refreshEndpoints()
-                        }
+                            refreshTotalCount: viewModel.refreshTotalCount,
+                            onRefresh: {
+                                await viewModel.refreshEndpoints()
+                            },
+                            onSearchApply: { query in
+                                viewModel.setSearchQuery(query)
+                            }
+                        )
                     }
                 }
                 .navigationTitle("Endpoints")

@@ -14,15 +14,18 @@ class HostsViewModel {
     // All hosts fetched from API (cache)
     private(set) var allHosts: [Host] = []
     
-    // All alerts fetched from API
+    // All alerts fetched from API (sorted by created date descending)
     private(set) var allAlerts: [Alert] = []
     
-    // Search query - changing this automatically updates filteredHosts
-    var searchQuery = "" {
-        didSet {
-            applyLocalFilter()
-        }
-    }
+    /// Precomputed lowercased search index keyed by host id. Rebuilt whenever
+    /// `allHosts` changes (via `setAllHosts`). Filtering uses this instead of
+    /// allocating ~15 `lowercased()` strings per host on every keystroke.
+    private var hostSearchIndex: [String: [String]] = [:]
+    
+    // Search query - updated explicitly via `setSearchQuery(_:)` (typically
+    // debounced by the view). Filtering is NOT triggered in a `didSet` so the
+    // view can own debounce timing and avoid double-filtering.
+    var searchQuery = ""
     
     // Filter state
     var selectedStatuses: Set<EndpointStatus> = [] {
@@ -109,7 +112,7 @@ class HostsViewModel {
         // Load cached hosts
         if let data = try? Data(contentsOf: hostsCacheURL),
            let cachedHosts = try? JSONDecoder().decode([Host].self, from: data) {
-            allHosts = cachedHosts
+            setAllHosts(cachedHosts)
             applyLocalFilter()
             print("Loaded \(cachedHosts.count) cached hosts")
         }
@@ -117,7 +120,7 @@ class HostsViewModel {
         // Load cached alerts
         if let data = try? Data(contentsOf: alertsCacheURL),
            let cachedAlerts = try? JSONDecoder().decode([Alert].self, from: data) {
-            allAlerts = cachedAlerts
+            allAlerts = sortedAlerts(cachedAlerts)
             print("Loaded \(cachedAlerts.count) cached alerts")
         }
         
@@ -152,27 +155,28 @@ class HostsViewModel {
     
     func loadConfiguration() async {
         configuration = await apiClient.getConfiguration()
-        applyDebugSettings()
+        await applyDebugSettings()
     }
     
     func saveConfiguration(_ config: AppConfiguration) async {
         config.save()
         configuration = config
         await apiClient.updateConfiguration(config)
-        applyDebugSettings()
+        await applyDebugSettings()
         // Re-apply filter in case stale endpoint setting changed
         applyLocalFilter()
     }
     
-    private func applyDebugSettings() {
-        // Sync debug settings to the DebugLogger singleton
-        DebugLogger.shared.isEnabled = configuration.isDebugModeEnabled
-        DebugLogger.shared.verboseEnabled = configuration.enableVerboseLogging
+    /// Syncs debug settings to the `DebugLogger` actor and the API client.
+    /// Now `async` because `DebugLogger` is an actor (flags are isolated).
+    private func applyDebugSettings() async {
+        await DebugLogger.shared.configure(
+            isEnabled: configuration.isDebugModeEnabled,
+            verboseEnabled: configuration.enableVerboseLogging
+        )
         
         // Sync debug settings to the API client
-        Task {
-            await apiClient.setLoggingEnabled(configuration.isDebugModeEnabled)
-        }
+        await apiClient.setLoggingEnabled(configuration.isDebugModeEnabled)
     }
     
     func checkCredentials() async {
@@ -182,7 +186,7 @@ class HostsViewModel {
         
         configuration = AppConfiguration.load()
         await apiClient.updateConfiguration(configuration)
-        applyDebugSettings()
+        await applyDebugSettings()
     }
     
     func authenticate(clientId: String, clientSecret: String, region: CrowdStrikeRegion) async {
@@ -246,7 +250,7 @@ class HostsViewModel {
         errorMessage = nil
         
         do {
-            allHosts = try await apiClient.searchAndRetrieveHostsWithProgress(query: nil) { [weak self] loaded, total in
+            let hosts = try await apiClient.searchAndRetrieveHostsWithProgress(query: nil) { [weak self] loaded, total in
                 Task { @MainActor in
                     self?.loadedCount = loaded
                     self?.totalCount = total
@@ -254,9 +258,14 @@ class HostsViewModel {
                     self?.loadingMessage = "Loading \(loaded) of \(total) endpoints..."
                 }
             }
+            setAllHosts(hosts)
             lastRefresh = Date()
             applyLocalFilter()
             saveCachedData()
+            
+            // If the host fetch succeeded, clear any stale error so success is
+            // reflected in the UI; alert failures will set a fresh message below.
+            errorMessage = nil
             
             // Also fetch alerts
             await refreshAlerts()
@@ -278,13 +287,14 @@ class HostsViewModel {
         errorMessage = nil
         
         do {
-            allHosts = try await apiClient.searchAndRetrieveHostsWithProgress(query: nil) { [weak self] loaded, total in
+            let hosts = try await apiClient.searchAndRetrieveHostsWithProgress(query: nil) { [weak self] loaded, total in
                 Task { @MainActor in
                     self?.refreshLoadedCount = loaded
                     self?.refreshTotalCount = total
                     self?.refreshProgress = total > 0 ? Double(loaded) / Double(total) : 0
                 }
             }
+            setAllHosts(hosts)
             lastRefresh = Date()
             applyLocalFilter()
             saveCachedData()
@@ -296,15 +306,22 @@ class HostsViewModel {
         refreshProgress = 0
     }
     
-    /// Fetches alerts from the API with progress
+    /// Fetches alerts from the API with progress.
+    ///
+    /// Guards against overlapping fetches: if an alert fetch is already in
+    /// progress (e.g., the initial `refreshHosts()` chain is running and the
+    /// user pulls to refresh on the Alerts tab), this call returns early
+    /// instead of launching a concurrent fetch.
     func refreshAlerts() async {
+        guard !isLoadingAlerts else { return }
+        
         isLoadingAlerts = true
         alertLoadingProgress = 0
         alertLoadedCount = 0
         alertTotalCount = 0
         
         do {
-            allAlerts = try await apiClient.fetchAlerts(
+            let alerts = try await apiClient.fetchAlerts(
                 limit: 500,
                 filterThirdParty: configuration.filterThirdPartyAlerts
             ) { [weak self] loaded, total in
@@ -314,10 +331,16 @@ class HostsViewModel {
                     self?.alertLoadingProgress = total > 0 ? Double(loaded) / Double(total) : 0
                 }
             }
+            allAlerts = sortedAlerts(alerts)
             saveCachedData()
-        } catch URLError.cancelled {
+        } catch is CancellationError {
+            // `fetchAlerts` now propagates cancellation as `CancellationError`
+            // (previously it wrapped it in `APIErrorType.networkError(URLError(.cancelled))`,
+            // which made this catch arm unreachable).
             print("Alert fetch cancelled - likely user navigated away")
         } catch {
+            // Surface alert fetch failures to the user (previously only logged).
+            errorMessage = error.localizedDescription
             print("Failed to fetch alerts: \(error)")
         }
         
@@ -327,12 +350,8 @@ class HostsViewModel {
     
     /// Pull-to-refresh for alerts only
     func refreshAlertsOnly() async {
-        isLoadingAlerts = true
-        alertLoadingProgress = 0
-        alertLoadedCount = 0
-        alertTotalCount = 0
+        // Reuses `refreshAlerts()`, which guards against overlapping fetches.
         errorMessage = nil
-        
         await refreshAlerts()
     }
     
@@ -350,11 +369,40 @@ class HostsViewModel {
         applyLocalFilter()
     }
     
+    /// Updates the search query and re-applies the local filter.
+    /// The view is responsible for debouncing calls to this method.
+    func setSearchQuery(_ query: String) {
+        searchQuery = query
+        applyLocalFilter()
+    }
+    
     /// Clear all filters
     func clearFilters() {
         selectedStatuses = []
         selectedPlatforms = []
         searchQuery = ""
+        applyLocalFilter()
+    }
+    
+    /// Sort alerts by created date descending (most recent first).
+    /// Alerts without a parseable created date sink to the bottom.
+    private func sortedAlerts(_ alerts: [Alert]) -> [Alert] {
+        return alerts.sorted { lhs, rhs in
+            let lhsDate = lhs.createdDate ?? .distantPast
+            let rhsDate = rhs.createdDate ?? .distantPast
+            return lhsDate > rhsDate
+        }
+    }
+    
+    /// Sets `allHosts` and rebuilds the precomputed search index. All
+    /// assignments to `allHosts` should go through this so the index stays
+    /// in sync with the data.
+    private func setAllHosts(_ hosts: [Host]) {
+        allHosts = hosts
+        hostSearchIndex.removeAll(keepingCapacity: true)
+        for host in hosts {
+            hostSearchIndex[host.id] = host.searchableFields
+        }
     }
     
     /// Apply local search filter to cached hosts
@@ -390,7 +438,7 @@ class HostsViewModel {
             }
         }
         
-        // Apply search query filter
+        // Apply search query filter using the precomputed index.
         let trimmedQuery = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         
         guard !trimmedQuery.isEmpty else {
@@ -399,23 +447,11 @@ class HostsViewModel {
         }
         
         hosts = filtered.filter { host in
-            host.hostname?.lowercased().contains(trimmedQuery) == true ||
-            host.localIp?.lowercased().contains(trimmedQuery) == true ||
-            host.externalIp?.lowercased().contains(trimmedQuery) == true ||
-            host.platformName?.lowercased().contains(trimmedQuery) == true ||
-            host.osProductName?.lowercased().contains(trimmedQuery) == true ||
-            host.osVersion?.lowercased().contains(trimmedQuery) == true ||
-            host.machineDomain?.lowercased().contains(trimmedQuery) == true ||
-            host.siteName?.lowercased().contains(trimmedQuery) == true ||
-            host.lastLoginUser?.lowercased().contains(trimmedQuery) == true ||
-            host.systemManufacturer?.lowercased().contains(trimmedQuery) == true ||
-            host.systemProductName?.lowercased().contains(trimmedQuery) == true ||
-            host.serialNumber?.lowercased().contains(trimmedQuery) == true ||
-            host.status?.lowercased().contains(trimmedQuery) == true ||
-            host.displayName.lowercased().contains(trimmedQuery) ||
-            host.agentVersion?.lowercased().contains(trimmedQuery) == true ||
-            host.tags?.contains { $0.lowercased().contains(trimmedQuery) } == true ||
-            host.groupIds?.contains { $0.lowercased().contains(trimmedQuery) } == true
+            guard let fields = hostSearchIndex[host.id] else {
+                // Fallback: build on the fly if missing from the index.
+                return host.searchableFields.contains { $0.contains(trimmedQuery) }
+            }
+            return fields.contains { $0.contains(trimmedQuery) }
         }
     }
     
@@ -423,8 +459,11 @@ class HostsViewModel {
     func logout() async {
         do {
             try await KeychainManager.shared.clearAll()
+            // Drop the in-memory access token immediately so subsequent
+            // operations don't briefly reuse stale credentials.
+            await apiClient.clearAuthState()
             hasCredentials = false
-            allHosts = []
+            setAllHosts([])
             hosts = []
             allAlerts = []
             searchQuery = ""

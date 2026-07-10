@@ -9,7 +9,7 @@ import Foundation
 
 // MARK: - Authentication Method
 
-enum AuthMethod: String, CaseIterable, Identifiable, Codable {
+enum AuthMethod: String, CaseIterable, Identifiable, Codable, Sendable {
     case oauth = "OAuth2"
     case bearerToken = "Bearer Token"
     
@@ -27,13 +27,14 @@ enum AuthMethod: String, CaseIterable, Identifiable, Codable {
 
 // MARK: - Proxy Configuration
 
-struct ProxyConfiguration: Codable, Equatable {
+nonisolated struct ProxyConfiguration: Codable, Equatable, Sendable {
     var isEnabled: Bool = false
     var host: String = ""
     var port: Int = 8080
     var requiresAuth: Bool = false
-    var username: String = ""
-    var password: String = ""
+    // NOTE: `username` and `password` have been moved to the keychain
+    // (see KeychainManager.storeProxyCredentials). They must NOT live in
+    // UserDefaults, where Codable AppConfiguration is persisted.
     
     static let `default` = ProxyConfiguration()
     
@@ -45,12 +46,13 @@ struct ProxyConfiguration: Codable, Equatable {
 
 // MARK: - App Configuration
 
-struct AppConfiguration: Codable, Equatable {
+nonisolated struct AppConfiguration: Codable, Equatable, Sendable {
     // Authentication
     var authMethod: AuthMethod = .oauth
     var region: CrowdStrikeRegion = .us1
     var customBaseURL: String = ""
-    var bearerToken: String = ""
+    // NOTE: `bearerToken` has been removed. Bearer tokens are stored
+    // exclusively in the keychain via KeychainManager.storeBearerToken.
     
     // Network
     var requestTimeout: Double = 30.0
@@ -117,13 +119,28 @@ struct AppConfiguration: Codable, Equatable {
 
 // MARK: - Debug Logger
 
-class DebugLogger {
+/// Centralized debug logger. Modeled as an `actor` so the `isEnabled` /
+/// `verboseEnabled` flags (mutated from the MainActor when settings change)
+/// and the log calls (potentially from the API client actor) are serialized.
+/// This avoids data races that a plain `class` with mutable `var` flags would
+/// have when accessed from multiple concurrency domains.
+actor DebugLogger {
+    
     static let shared = DebugLogger()
+    
+    private var isEnabled: Bool = false
+    private var verboseEnabled: Bool = false
     
     private init() {}
     
-    var isEnabled: Bool = false
-    var verboseEnabled: Bool = false
+    // MARK: - Configuration
+    
+    func configure(isEnabled: Bool, verboseEnabled: Bool) {
+        self.isEnabled = isEnabled
+        self.verboseEnabled = verboseEnabled
+    }
+    
+    // MARK: - Logging
     
     func log(_ message: String, category: String = "General", isVerbose: Bool = false) {
         guard isEnabled else { return }
@@ -138,7 +155,12 @@ class DebugLogger {
         guard isEnabled else { return }
         log("Request: \(request.httpMethod ?? "?") \(request.url?.absoluteString ?? "?")", category: "Network")
         if verboseEnabled, let headers = request.allHTTPHeaderFields {
-            log("Headers: \(headers)", category: "Network", isVerbose: true)
+            // Redact the Authorization header before logging
+            var safeHeaders = headers
+            if safeHeaders["Authorization"] != nil {
+                safeHeaders["Authorization"] = "***REDACTED***"
+            }
+            log("Headers: \(safeHeaders)", category: "Network", isVerbose: true)
         }
         if verboseEnabled, let body = request.httpBody, let bodyString = String(data: body, encoding: .utf8) {
             let redacted = redactSensitive(bodyString)
@@ -160,7 +182,8 @@ class DebugLogger {
         log("Error: \(context) - \(error.localizedDescription)", category: "Error")
     }
     
-    private func redactSensitive(_ string: String) -> String {
+    /// Pure helper — no isolation concerns.
+    private nonisolated func redactSensitive(_ string: String) -> String {
         var result = string
         result = result.replacingOccurrences(
             of: "client_secret=[^&]+",
@@ -170,6 +193,12 @@ class DebugLogger {
         result = result.replacingOccurrences(
             of: "\"access_token\"\\s*:\\s*\"[^\"]+\"",
             with: "\"access_token\":\"***REDACTED***\"",
+            options: .regularExpression
+        )
+        // Also redact bearer tokens in Authorization headers within request bodies
+        result = result.replacingOccurrences(
+            of: "Bearer\\s+[A-Za-z0-9\\-\\._~+\\/]+=*",
+            with: "Bearer ***REDACTED***",
             options: .regularExpression
         )
         return result
