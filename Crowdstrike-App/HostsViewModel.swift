@@ -114,7 +114,6 @@ class HostsViewModel {
             isEnabled: configuration.isDebugModeEnabled,
             verboseEnabled: configuration.enableVerboseLogging
         )
-        await apiClient.setLoggingEnabled(configuration.isDebugModeEnabled)
     }
     
     func checkCredentials() async {
