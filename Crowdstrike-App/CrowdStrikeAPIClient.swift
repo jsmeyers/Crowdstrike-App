@@ -226,16 +226,20 @@ actor CrowdStrikeAPIClient {
         return (canReadHosts, canReadAlerts, errorMessage)
     }
     
-    // MARK: - Hosts API (Cursor Pagination)
+    // MARK: - Hosts API (Offset Pagination with Date-Chunked Fallback)
     
-    private func searchHostsPage(query: String?, after: String?, limit: Int) async throws -> (hostIds: [String], nextAfter: String?, total: Int?) {
+    /// The Devices Query API (`/devices/queries/devices/v1`) paginates with `offset` + `limit`
+    /// (max page size 5000), and caps combined `offset + limit` at 10,000. To retrieve more
+    /// than 10,000 host IDs we chunk by `last_seen` date windows and recurse into narrower
+    /// windows whenever a window hits the 10,000 cap.
+    private func searchHostsPage(query: String?, offset: Int?, limit: Int) async throws -> (hostIds: [String], nextOffset: Int?, total: Int?) {
         try await ensureValidToken()
         var urlString = "\(configuration.baseURLWithProtocol)/devices/queries/devices/v1?limit=\(limit)"
         if let query = query, !query.isEmpty {
             urlString += "&filter=\(encodeFQLFilter(query))"
         }
-        if let after {
-            urlString += "&after=\(after)"
+        if let offset {
+            urlString += "&offset=\(offset)"
         }
         guard let url = URL(string: urlString) else { throw APIError.invalidResponse }
         var request = URLRequest(url: url)
@@ -254,9 +258,15 @@ actor CrowdStrikeAPIClient {
         
         let ids = hostsResponse.resources ?? []
         let total = hostsResponse.meta?.pagination?.total ?? 0
-        let nextAfter = hostsResponse.meta?.pagination?.after
+        let apiOffset = hostsResponse.meta?.pagination?.offset ?? (offset ?? 0)
         
-        return (ids, nextAfter, total)
+        // The Devices Query API caps combined offset + limit at 10,000.
+        let nextOffset: Int? = ids.isEmpty ? nil : (apiOffset > (offset ?? 0) ? apiOffset : (offset ?? 0) + ids.count)
+        let reachedCap = (nextOffset ?? 0) >= 10000
+        let reachedTotal = total > 0 && (nextOffset ?? 0) >= total
+        let shouldBreak = nextOffset == nil || ids.isEmpty || reachedTotal || reachedCap
+        
+        return (ids, shouldBreak ? nil : nextOffset, total)
     }
     
     private func getHostDetailsBatch(hostIds: [String]) async throws -> [Host] {
@@ -309,16 +319,35 @@ actor CrowdStrikeAPIClient {
         
         if totalCount == 0 { return [] }
         var allHostIds: [String] = []
-        var currentAfter: String? = nil
-        let limit = 500
         let halfTotal = totalCount / 2
-        while true {
-            try Task.checkCancellation()
-            let (hostIds, nextAfter, _) = try await searchHostsPage(query: query, after: currentAfter, limit: limit)
-            allHostIds.append(contentsOf: hostIds)
-            currentAfter = nextAfter
-            progressHandler(min(allHostIds.count, halfTotal), totalCount)
-            if nextAfter == nil || hostIds.isEmpty { break }
+        let offsetCap = 10000
+        
+        if totalCount <= offsetCap {
+            // Simple offset pagination covers the full result set.
+            var offset = 0
+            while true {
+                try Task.checkCancellation()
+                let (hostIds, nextOffset, _) = try await searchHostsPage(query: query, offset: offset, limit: 5000)
+                allHostIds.append(contentsOf: hostIds)
+                progressHandler(min(allHostIds.count, halfTotal), totalCount)
+                guard let next = nextOffset, next > offset, !hostIds.isEmpty else { break }
+                offset = next
+            }
+        } else {
+            // Result set exceeds the 10,000 offset cap: chunk by last_seen date windows.
+            var seenIds = Set<String>()
+            let now = Date()
+            let startDate = Calendar.current.date(byAdding: .year, value: -10, to: now)!
+            try await fetchHostIdsInDateRange(
+                start: startDate,
+                end: now,
+                baseQuery: query,
+                seenIds: &seenIds,
+                allIds: &allHostIds,
+                totalCount: totalCount,
+                halfTotal: halfTotal,
+                progress: progressHandler
+            )
         }
         print("Total host IDs fetched: \(allHostIds.count)")
         var allHosts: [Host] = []
@@ -335,6 +364,76 @@ actor CrowdStrikeAPIClient {
         }
         print("Total hosts retrieved: \(allHosts.count)")
         return allHosts
+    }
+    
+    /// Recursively fetches host IDs within a `last_seen` date window using offset pagination.
+    /// If a window hits the 10,000 offset cap, it is split in half and each half is fetched
+    /// independently so we can exceed the API's 10k-per-query limit. IDs are de-duplicated
+    /// across windows (boundary timestamps can overlap between the two halves).
+    private func fetchHostIdsInDateRange(
+        start: Date,
+        end: Date,
+        baseQuery: String?,
+        seenIds: inout Set<String>,
+        allIds: inout [String],
+        totalCount: Int,
+        halfTotal: Int,
+        progress: @escaping (Int, Int) -> Void
+    ) async throws {
+        try Task.checkCancellation()
+        let isoFormatter = ISO8601DateFormatter()
+        isoFormatter.formatOptions = [.withInternetDateTime]
+        let startStr = isoFormatter.string(from: start)
+        let endStr = isoFormatter.string(from: end)
+        
+        var filters: [String] = [
+            "last_seen:>='\(startStr)'",
+            "last_seen:<='\(endStr)'"
+        ]
+        if let baseQuery, !baseQuery.isEmpty {
+            filters.append(baseQuery)
+        }
+        let filterString = filters.joined(separator: "+")
+        
+        var offset = 0
+        var hitCap = false
+        while true {
+            try Task.checkCancellation()
+            let (ids, nextOffset, _) = try await searchHostsPage(query: filterString, offset: offset, limit: 5000)
+            for id in ids where !seenIds.contains(id) {
+                seenIds.insert(id)
+                allIds.append(id)
+            }
+            progress(min(allIds.count, halfTotal), totalCount)
+            if let next = nextOffset, next > offset {
+                offset = next
+                if offset >= 10000 {
+                    hitCap = true
+                    break
+                }
+            } else {
+                break
+            }
+        }
+        
+        guard hitCap else { return }
+        
+        // Window too large to page through entirely; split it and recurse.
+        let mid = Date(timeIntervalSince1970: (start.timeIntervalSince1970 + end.timeIntervalSince1970) / 2)
+        guard mid > start, mid < end else {
+            // Cannot narrow further; keep what we retrieved for this sliver.
+            return
+        }
+        try await fetchHostIdsInDateRange(
+            start: start, end: mid, baseQuery: baseQuery,
+            seenIds: &seenIds, allIds: &allIds,
+            totalCount: totalCount, halfTotal: halfTotal, progress: progress
+        )
+        try await fetchHostIdsInDateRange(
+            start: mid, end: end, baseQuery: baseQuery,
+            seenIds: &seenIds, allIds: &allIds,
+            totalCount: totalCount, halfTotal: halfTotal, progress: progress
+        )
     }
     
     // MARK: - Alerts API (Date-Chunked Pagination)
@@ -441,7 +540,6 @@ actor CrowdStrikeAPIClient {
         var allAlerts: [Alert] = []
         let batchSize = 50
         var errorCount = 0
-        var loggedFirstBatch = false
         let session = urlSession()
         
         for i in stride(from: 0, to: filteredIds.count, by: batchSize) {
@@ -460,10 +558,6 @@ actor CrowdStrikeAPIClient {
             do {
                 let (detailsData, detailsResponse) = try await session.data(for: detailsRequest)
                 let statusCode = (detailsResponse as? HTTPURLResponse)?.statusCode ?? 0
-                if !loggedFirstBatch {
-                    logResponse(detailsData, label: "Alert Details Response (First Batch)")
-                    loggedFirstBatch = true
-                }
                 if statusCode == 200 {
                     let decoder = JSONDecoder()
                     do {
