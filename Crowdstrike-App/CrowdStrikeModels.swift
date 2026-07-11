@@ -1,28 +1,19 @@
-//
-//  CrowdStrikeModels.swift
-//  Crowdstrike-App
-//
-
 import Foundation
 
 // MARK: - OAuth Token Response
-
 nonisolated struct OAuthTokenResponse: Codable, Sendable {
     let accessToken: String?
     let expiresIn: Int?
     let tokenType: String?
-    let scope: String?
     
     enum CodingKeys: String, CodingKey {
         case accessToken = "access_token"
         case expiresIn = "expires_in"
         case tokenType = "token_type"
-        case scope
     }
 }
 
 // MARK: - Host Models
-
 nonisolated struct Host: Identifiable, Codable, Hashable, Sendable {
     let id: String
     let hostname: String?
@@ -63,59 +54,20 @@ nonisolated struct Host: Identifiable, Codable, Hashable, Sendable {
     
     enum CodingKeys: String, CodingKey {
         case id = "device_id"
-        case hostname
-        case localIp = "local_ip"
-        case externalIp = "external_ip"
-        case macAddress = "mac_address"
-        case osVersion = "os_version"
-        case osProductName = "os_product_name"
-        case platformName = "platform_name"
-        case status
-        case lastSeen = "last_seen"
-        case firstSeen = "first_seen"
-        case country
-        case city
-        case agentVersion = "agent_version"
-        case ou
-        case groups
-        case cid
-        case majorVersion = "major_version"
-        case minorVersion = "minor_version"
-        case buildNumber = "build_number"
-        case machineDomain = "machine_domain"
-        case siteName = "site_name"
-        case lastLoginUser = "last_login_user"
-        case lastLoginTimestamp = "last_login_timestamp"
-        case productType = "product_type"
-        case productTypeDesc = "product_type_desc"
-        case systemManufacturer = "system_manufacturer"
-        case systemProductName = "system_product_name"
-        case serialNumber = "serial_number"
-        case chassisType = "chassis_type"
-        case chassisTypeDesc = "chassis_type_desc"
-        case connectionIp = "connection_ip"
-        case defaultGatewayIp = "default_gateway_ip"
-        case tags
+        case hostname, localIp = "local_ip", externalIp = "external_ip", macAddress = "mac_address"
+        case osVersion = "os_version", osProductName = "os_product_name", platformName = "platform_name"
+        case status, lastSeen = "last_seen", firstSeen = "first_seen", country, city
+        case agentVersion = "agent_version", ou, groups, cid
+        case majorVersion = "major_version", minorVersion = "minor_version", buildNumber = "build_number"
+        case machineDomain = "machine_domain", siteName = "site_name"
+        case lastLoginUser = "last_login_user", lastLoginTimestamp = "last_login_timestamp"
+        case productType = "product_type", productTypeDesc = "product_type_desc"
+        case systemManufacturer = "system_manufacturer", systemProductName = "system_product_name"
+        case serialNumber = "serial_number", chassisType = "chassis_type", chassisTypeDesc = "chassis_type_desc"
+        case connectionIp = "connection_ip", defaultGatewayIp = "default_gateway_ip", tags
     }
     
-    init(
-        id: String,
-        hostname: String? = nil,
-        localIp: String? = nil,
-        externalIp: String? = nil,
-        macAddress: String? = nil,
-        osVersion: String? = nil,
-        osProductName: String? = nil,
-        platformName: String? = nil,
-        status: String? = nil,
-        lastSeen: String? = nil,
-        firstSeen: String? = nil,
-        country: String? = nil,
-        city: String? = nil,
-        agentVersion: String? = nil,
-        ou: String? = nil,
-        groups: [HostGroup]? = nil
-    ) {
+    init(id: String, hostname: String? = nil, localIp: String? = nil, externalIp: String? = nil, macAddress: String? = nil, osVersion: String? = nil, osProductName: String? = nil, platformName: String? = nil, status: String? = nil, lastSeen: String? = nil, firstSeen: String? = nil, country: String? = nil, city: String? = nil, agentVersion: String? = nil, ou: String? = nil, groups: [HostGroup]? = nil) {
         self.id = id
         self.hostname = hostname
         self.localIp = localIp
@@ -154,58 +106,44 @@ nonisolated struct Host: Identifiable, Codable, Hashable, Sendable {
         self.tags = nil
     }
     
-    private static func fallbackIdentifier(
-        hostname: String?,
-        localIp: String?,
-        externalIp: String?,
-        macAddress: String?,
-        firstSeen: String?
-    ) -> String {
-        let parts = [hostname, localIp, externalIp, macAddress, firstSeen]
-            .compactMap { $0?.isEmpty == false ? $0 : nil }
-        if parts.isEmpty {
-            return "unknown:\(Date().timeIntervalSince1970)"
-        }
+    private static func fallbackIdentifier(hostname: String?, localIp: String?, externalIp: String?, macAddress: String?, firstSeen: String?) -> String {
+        let parts = [hostname, localIp, externalIp, macAddress, firstSeen].compactMap { $0?.isEmpty == false ? $0 : nil }
+        if parts.isEmpty { return "unknown-empty" }
         return "unknown:" + parts.joined(separator: "|")
     }
     
     init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        
-        if let deviceId = try? container.decode(String.self, forKey: .id) {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        if let deviceId = try? c.decode(String.self, forKey: .id) {
             id = deviceId
-        } else if let deviceIdInt = try? container.decode(Int.self, forKey: .id) {
+        } else if let deviceIdInt = try? c.decode(Int.self, forKey: .id) {
             id = String(deviceIdInt)
         } else {
-            let hn = try? container.decodeIfPresent(String.self, forKey: .hostname)
-            let lip = try? container.decodeIfPresent(String.self, forKey: .localIp)
-            let eip = try? container.decodeIfPresent(String.self, forKey: .externalIp)
-            let mac = try? container.decodeIfPresent(String.self, forKey: .macAddress)
-            let fs = try? container.decodeIfPresent(String.self, forKey: .firstSeen)
-            id = Self.fallbackIdentifier(
-                hostname: hn, localIp: lip, externalIp: eip,
-                macAddress: mac, firstSeen: fs
-            )
+            let hn = try? c.decodeIfPresent(String.self, forKey: .hostname)
+            let lip = try? c.decodeIfPresent(String.self, forKey: .localIp)
+            let eip = try? c.decodeIfPresent(String.self, forKey: .externalIp)
+            let mac = try? c.decodeIfPresent(String.self, forKey: .macAddress)
+            let fs = try? c.decodeIfPresent(String.self, forKey: .firstSeen)
+            id = Self.fallbackIdentifier(hostname: hn, localIp: lip, externalIp: eip, macAddress: mac, firstSeen: fs)
         }
+        hostname = try c.decodeIfPresent(String.self, forKey: .hostname)
+        localIp = try c.decodeIfPresent(String.self, forKey: .localIp)
+        externalIp = try c.decodeIfPresent(String.self, forKey: .externalIp)
+        macAddress = try c.decodeIfPresent(String.self, forKey: .macAddress)
+        osVersion = try c.decodeIfPresent(String.self, forKey: .osVersion)
+        osProductName = try c.decodeIfPresent(String.self, forKey: .osProductName)
+        platformName = try c.decodeIfPresent(String.self, forKey: .platformName)
+        status = try c.decodeIfPresent(String.self, forKey: .status)
+        lastSeen = try c.decodeIfPresent(String.self, forKey: .lastSeen)
+        firstSeen = try c.decodeIfPresent(String.self, forKey: .firstSeen)
+        country = try c.decodeIfPresent(String.self, forKey: .country)
+        city = try c.decodeIfPresent(String.self, forKey: .city)
+        agentVersion = try c.decodeIfPresent(String.self, forKey: .agentVersion)
         
-        hostname = try container.decodeIfPresent(String.self, forKey: .hostname)
-        localIp = try container.decodeIfPresent(String.self, forKey: .localIp)
-        externalIp = try container.decodeIfPresent(String.self, forKey: .externalIp)
-        macAddress = try container.decodeIfPresent(String.self, forKey: .macAddress)
-        osVersion = try container.decodeIfPresent(String.self, forKey: .osVersion)
-        osProductName = try container.decodeIfPresent(String.self, forKey: .osProductName)
-        platformName = try container.decodeIfPresent(String.self, forKey: .platformName)
-        status = try container.decodeIfPresent(String.self, forKey: .status)
-        lastSeen = try container.decodeIfPresent(String.self, forKey: .lastSeen)
-        firstSeen = try container.decodeIfPresent(String.self, forKey: .firstSeen)
-        country = try container.decodeIfPresent(String.self, forKey: .country)
-        city = try container.decodeIfPresent(String.self, forKey: .city)
-        agentVersion = try container.decodeIfPresent(String.self, forKey: .agentVersion)
-        
-        if let ouString = try? container.decodeIfPresent(String.self, forKey: .ou) {
+        if let ouString = try? c.decodeIfPresent(String.self, forKey: .ou) {
             ou = ouString.isEmpty ? nil : ouString
             ouList = ouString.isEmpty ? nil : [ouString]
-        } else if let ouArray = try? container.decodeIfPresent([String].self, forKey: .ou) {
+        } else if let ouArray = try? c.decodeIfPresent([String].self, forKey: .ou) {
             ouList = ouArray.isEmpty ? nil : ouArray
             ou = ouArray.isEmpty ? nil : ouArray.joined(separator: ", ")
         } else {
@@ -213,10 +151,10 @@ nonisolated struct Host: Identifiable, Codable, Hashable, Sendable {
             ouList = nil
         }
         
-        if let groupObjects = try? container.decodeIfPresent([HostGroup].self, forKey: .groups) {
+        if let groupObjects = try? c.decodeIfPresent([HostGroup].self, forKey: .groups) {
             groups = groupObjects
             groupIds = nil
-        } else if let groupArray = try? container.decodeIfPresent([String].self, forKey: .groups) {
+        } else if let groupArray = try? c.decodeIfPresent([String].self, forKey: .groups) {
             groupIds = groupArray
             groups = groupArray.map { HostGroup(id: $0, name: nil) }
         } else {
@@ -224,69 +162,68 @@ nonisolated struct Host: Identifiable, Codable, Hashable, Sendable {
             groupIds = nil
         }
         
-        cid = try container.decodeIfPresent(String.self, forKey: .cid)
-        majorVersion = try container.decodeIfPresent(String.self, forKey: .majorVersion)
-        minorVersion = try container.decodeIfPresent(String.self, forKey: .minorVersion)
-        buildNumber = try container.decodeIfPresent(String.self, forKey: .buildNumber)
-        machineDomain = try container.decodeIfPresent(String.self, forKey: .machineDomain)
-        siteName = try container.decodeIfPresent(String.self, forKey: .siteName)
-        lastLoginUser = try container.decodeIfPresent(String.self, forKey: .lastLoginUser)
-        lastLoginTimestamp = try container.decodeIfPresent(String.self, forKey: .lastLoginTimestamp)
-        productType = try container.decodeIfPresent(String.self, forKey: .productType)
-        productTypeDesc = try container.decodeIfPresent(String.self, forKey: .productTypeDesc)
-        systemManufacturer = try container.decodeIfPresent(String.self, forKey: .systemManufacturer)
-        systemProductName = try container.decodeIfPresent(String.self, forKey: .systemProductName)
-        serialNumber = try container.decodeIfPresent(String.self, forKey: .serialNumber)
-        chassisType = try container.decodeIfPresent(String.self, forKey: .chassisType)
-        chassisTypeDesc = try container.decodeIfPresent(String.self, forKey: .chassisTypeDesc)
-        connectionIp = try container.decodeIfPresent(String.self, forKey: .connectionIp)
-        defaultGatewayIp = try container.decodeIfPresent(String.self, forKey: .defaultGatewayIp)
-        tags = try container.decodeIfPresent([String].self, forKey: .tags)
+        cid = try c.decodeIfPresent(String.self, forKey: .cid)
+        majorVersion = try c.decodeIfPresent(String.self, forKey: .majorVersion)
+        minorVersion = try c.decodeIfPresent(String.self, forKey: .minorVersion)
+        buildNumber = try c.decodeIfPresent(String.self, forKey: .buildNumber)
+        machineDomain = try c.decodeIfPresent(String.self, forKey: .machineDomain)
+        siteName = try c.decodeIfPresent(String.self, forKey: .siteName)
+        lastLoginUser = try c.decodeIfPresent(String.self, forKey: .lastLoginUser)
+        lastLoginTimestamp = try c.decodeIfPresent(String.self, forKey: .lastLoginTimestamp)
+        productType = try c.decodeIfPresent(String.self, forKey: .productType)
+        productTypeDesc = try c.decodeIfPresent(String.self, forKey: .productTypeDesc)
+        systemManufacturer = try c.decodeIfPresent(String.self, forKey: .systemManufacturer)
+        systemProductName = try c.decodeIfPresent(String.self, forKey: .systemProductName)
+        serialNumber = try c.decodeIfPresent(String.self, forKey: .serialNumber)
+        chassisType = try c.decodeIfPresent(String.self, forKey: .chassisType)
+        chassisTypeDesc = try c.decodeIfPresent(String.self, forKey: .chassisTypeDesc)
+        connectionIp = try c.decodeIfPresent(String.self, forKey: .connectionIp)
+        defaultGatewayIp = try c.decodeIfPresent(String.self, forKey: .defaultGatewayIp)
+        tags = try c.decodeIfPresent([String].self, forKey: .tags)
     }
     
     func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(id, forKey: .id)
-        try container.encodeIfPresent(hostname, forKey: .hostname)
-        try container.encodeIfPresent(localIp, forKey: .localIp)
-        try container.encodeIfPresent(externalIp, forKey: .externalIp)
-        try container.encodeIfPresent(macAddress, forKey: .macAddress)
-        try container.encodeIfPresent(osVersion, forKey: .osVersion)
-        try container.encodeIfPresent(osProductName, forKey: .osProductName)
-        try container.encodeIfPresent(platformName, forKey: .platformName)
-        try container.encodeIfPresent(status, forKey: .status)
-        try container.encodeIfPresent(lastSeen, forKey: .lastSeen)
-        try container.encodeIfPresent(firstSeen, forKey: .firstSeen)
-        try container.encodeIfPresent(country, forKey: .country)
-        try container.encodeIfPresent(city, forKey: .city)
-        try container.encodeIfPresent(agentVersion, forKey: .agentVersion)
-        try container.encodeIfPresent(ouList, forKey: .ou)
-        try container.encodeIfPresent(groupIds, forKey: .groups)
-        try container.encodeIfPresent(cid, forKey: .cid)
-        try container.encodeIfPresent(majorVersion, forKey: .majorVersion)
-        try container.encodeIfPresent(minorVersion, forKey: .minorVersion)
-        try container.encodeIfPresent(buildNumber, forKey: .buildNumber)
-        try container.encodeIfPresent(machineDomain, forKey: .machineDomain)
-        try container.encodeIfPresent(siteName, forKey: .siteName)
-        try container.encodeIfPresent(lastLoginUser, forKey: .lastLoginUser)
-        try container.encodeIfPresent(lastLoginTimestamp, forKey: .lastLoginTimestamp)
-        try container.encodeIfPresent(productType, forKey: .productType)
-        try container.encodeIfPresent(productTypeDesc, forKey: .productTypeDesc)
-        try container.encodeIfPresent(systemManufacturer, forKey: .systemManufacturer)
-        try container.encodeIfPresent(systemProductName, forKey: .systemProductName)
-        try container.encodeIfPresent(serialNumber, forKey: .serialNumber)
-        try container.encodeIfPresent(chassisType, forKey: .chassisType)
-        try container.encodeIfPresent(chassisTypeDesc, forKey: .chassisTypeDesc)
-        try container.encodeIfPresent(connectionIp, forKey: .connectionIp)
-        try container.encodeIfPresent(defaultGatewayIp, forKey: .defaultGatewayIp)
-        try container.encodeIfPresent(tags, forKey: .tags)
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encodeIfPresent(hostname, forKey: .hostname)
+        try c.encodeIfPresent(localIp, forKey: .localIp)
+        try c.encodeIfPresent(externalIp, forKey: .externalIp)
+        try c.encodeIfPresent(macAddress, forKey: .macAddress)
+        try c.encodeIfPresent(osVersion, forKey: .osVersion)
+        try c.encodeIfPresent(osProductName, forKey: .osProductName)
+        try c.encodeIfPresent(platformName, forKey: .platformName)
+        try c.encodeIfPresent(status, forKey: .status)
+        try c.encodeIfPresent(lastSeen, forKey: .lastSeen)
+        try c.encodeIfPresent(firstSeen, forKey: .firstSeen)
+        try c.encodeIfPresent(country, forKey: .country)
+        try c.encodeIfPresent(city, forKey: .city)
+        try c.encodeIfPresent(agentVersion, forKey: .agentVersion)
+        try c.encodeIfPresent(ouList, forKey: .ou)
+        try c.encodeIfPresent(groupIds, forKey: .groups)
+        try c.encodeIfPresent(cid, forKey: .cid)
+        try c.encodeIfPresent(majorVersion, forKey: .majorVersion)
+        try c.encodeIfPresent(minorVersion, forKey: .minorVersion)
+        try c.encodeIfPresent(buildNumber, forKey: .buildNumber)
+        try c.encodeIfPresent(machineDomain, forKey: .machineDomain)
+        try c.encodeIfPresent(siteName, forKey: .siteName)
+        try c.encodeIfPresent(lastLoginUser, forKey: .lastLoginUser)
+        try c.encodeIfPresent(lastLoginTimestamp, forKey: .lastLoginTimestamp)
+        try c.encodeIfPresent(productType, forKey: .productType)
+        try c.encodeIfPresent(productTypeDesc, forKey: .productTypeDesc)
+        try c.encodeIfPresent(systemManufacturer, forKey: .systemManufacturer)
+        try c.encodeIfPresent(systemProductName, forKey: .systemProductName)
+        try c.encodeIfPresent(serialNumber, forKey: .serialNumber)
+        try c.encodeIfPresent(chassisType, forKey: .chassisType)
+        try c.encodeIfPresent(chassisTypeDesc, forKey: .chassisTypeDesc)
+        try c.encodeIfPresent(connectionIp, forKey: .connectionIp)
+        try c.encodeIfPresent(defaultGatewayIp, forKey: .defaultGatewayIp)
+        try c.encodeIfPresent(tags, forKey: .tags)
     }
     
     var displayName: String { hostname ?? "Unknown Host" }
     
     var searchableFields: [String] {
-        var fields: [String] = []
-        fields.append(displayName.lowercased())
+        var fields: [String] = [displayName.lowercased()]
         if let hostname { fields.append(hostname.lowercased()) }
         if let localIp { fields.append(localIp.lowercased()) }
         if let externalIp { fields.append(externalIp.lowercased()) }
@@ -337,8 +274,6 @@ nonisolated struct Host: Identifiable, Codable, Hashable, Sendable {
     }
 }
 
-// MARK: - HostGroup
-
 nonisolated struct HostGroup: Codable, Hashable, Sendable {
     let id: String?
     let name: String?
@@ -354,14 +289,13 @@ nonisolated struct HostGroup: Codable, Hashable, Sendable {
     }
     
     init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        id = try container.decodeIfPresent(String.self, forKey: .id)
-        name = try container.decodeIfPresent(String.self, forKey: .name)
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(String.self, forKey: .id)
+        name = try c.decodeIfPresent(String.self, forKey: .name)
     }
 }
 
-// MARK: - Alert Device (nested in Alert response)
-
+// MARK: - Alert Models
 nonisolated struct AlertDevice: Codable, Sendable {
     let deviceId: String?
     let hostname: String?
@@ -390,35 +324,14 @@ nonisolated struct AlertDevice: Codable, Sendable {
     let tags: [String]?
     
     enum CodingKeys: String, CodingKey {
-        case deviceId = "device_id"
-        case hostname
-        case localIp = "local_ip"
-        case externalIp = "external_ip"
-        case macAddress = "mac_address"
-        case osVersion = "os_version"
-        case platformName = "platform_name"
-        case status
-        case lastSeen = "last_seen"
-        case firstSeen = "first_seen"
-        case country
-        case city
-        case agentVersion = "agent_version"
-        case machineDomain = "machine_domain"
-        case siteName = "site_name"
-        case productType = "product_type"
-        case productTypeDesc = "product_type_desc"
-        case systemManufacturer = "system_manufacturer"
-        case systemProductName = "system_product_name"
-        case majorVersion = "major_version"
-        case minorVersion = "minor_version"
-        case cid
-        case ou
-        case groups
-        case tags
+        case deviceId = "device_id", hostname, localIp = "local_ip", externalIp = "external_ip", macAddress = "mac_address"
+        case osVersion = "os_version", platformName = "platform_name", status, lastSeen = "last_seen", firstSeen = "first_seen"
+        case country, city, agentVersion = "agent_version", machineDomain = "machine_domain", siteName = "site_name"
+        case productType = "product_type", productTypeDesc = "product_type_desc"
+        case systemManufacturer = "system_manufacturer", systemProductName = "system_product_name"
+        case majorVersion = "major_version", minorVersion = "minor_version", cid, ou, groups, tags
     }
 }
-
-// MARK: - Alert Process Details
 
 nonisolated struct AlertProcessDetails: Codable, Sendable {
     let sha256: String?
@@ -433,20 +346,10 @@ nonisolated struct AlertProcessDetails: Codable, Sendable {
     let timestamp: String?
     
     enum CodingKeys: String, CodingKey {
-        case sha256
-        case md5
-        case filename
-        case filepath
-        case cmdline
-        case processId = "process_id"
-        case localProcessId = "local_process_id"
-        case userId = "user_id"
-        case userName = "user_name"
-        case timestamp
+        case sha256, md5, filename, filepath, cmdline
+        case processId = "process_id", localProcessId = "local_process_id", userId = "user_id", userName = "user_name", timestamp
     }
 }
-
-// MARK: - Alert Model
 
 nonisolated struct Alert: Identifiable, Codable, Hashable, Sendable {
     let id: String
@@ -505,192 +408,125 @@ nonisolated struct Alert: Identifiable, Codable, Hashable, Sendable {
     let policyName: String?
     
     let device: AlertDevice?
-    
     let compositeId: String?
     let agentId: String?
     
     enum CodingKeys: String, CodingKey {
-        case id
-        case name
-        case description
-        case severity
-        case status
-        case createdTime = "created_timestamp"
-        case updatedTime = "updated_timestamp"
-        case tactic
-        case technique
-        case tacticId = "tactic_id"
-        case techniqueId = "technique_id"
-        case cid
-        case type
-        case scenario
-        case objective
-        case patternId = "pattern_id"
-        case confidence
-        case severityName = "severity_name"
-        case startTime = "timestamp"
-        case endTime = "process_end_time"
-        
-        case fileName = "filename"
-        case filePath = "filepath"
-        case sha256
-        case md5
-        case commandLine = "cmdline"
-        case processId = "parent_process_id"
-        case localProcessId = "local_process_id"
-        case userId = "user_id"
-        case userName = "user_name"
-        
-        case parentDetails = "parent_details"
-        case grandparentDetails = "grandparent_details"
-        
-        case localIp = "local_ip"
-        case localPort = "local_port"
-        case remoteIp = "remote_ip"
-        case remotePort = "remote_port"
-        case networkProtocol = "protocol"
-        case networkDirection
-        
-        case country
-        case city
-        case rootSite = "site"
-        case siteId = "site_id"
-        case rootMachineDomain = "machine_domain"
-        case rootOu = "ou"
-        
-        case tags
-        case hostGroups = "host_groups"
-        case assignedTo = "assigned_to"
-        case assignedToName = "assigned_to_name"
-        case policyId = "policy_id"
-        case policyName = "policy_name"
-        
-        case device
-        case compositeId = "composite_id"
-        case agentId = "agent_id"
+        case id, name, description, severity, status
+        case createdTime = "created_timestamp", updatedTime = "updated_timestamp"
+        case tactic, technique, tacticId = "tactic_id", techniqueId = "technique_id"
+        case cid, type, scenario, objective, patternId = "pattern_id", confidence, severityName = "severity_name"
+        case startTime = "timestamp", endTime = "process_end_time"
+        case fileName = "filename", filePath = "filepath", sha256, md5, commandLine = "cmdline"
+        case processId = "parent_process_id", localProcessId = "local_process_id", userId = "user_id", userName = "user_name"
+        case parentDetails = "parent_details", grandparentDetails = "grandparent_details"
+        case localIp = "local_ip", localPort = "local_port", remoteIp = "remote_ip", remotePort = "remote_port", networkProtocol = "protocol", networkDirection
+        case country, city, rootSite = "site", siteId = "site_id", rootMachineDomain = "machine_domain", rootOu = "ou"
+        case tags, hostGroups = "host_groups", assignedTo = "assigned_to", assignedToName = "assigned_to_name", policyId = "policy_id", policyName = "policy_name"
+        case device, compositeId = "composite_id", agentId = "agent_id"
     }
     
-    private static func fallbackIdentifier(
-        name: String?,
-        createdTime: String?,
-        deviceId: String?,
-        severity: Int?
-    ) -> String {
+    private static func fallbackIdentifier(name: String?, createdTime: String?, deviceId: String?, severity: Int?) -> String {
         var parts: [String] = []
         if let name, !name.isEmpty { parts.append(name) }
         if let createdTime, !createdTime.isEmpty { parts.append(createdTime) }
         if let deviceId, !deviceId.isEmpty { parts.append(deviceId) }
         if let severity { parts.append(String(severity)) }
-        if parts.isEmpty {
-            return "unknown:\(Date().timeIntervalSince1970)"
-        }
+        if parts.isEmpty { return "unknown-empty" }
         return "unknown:" + parts.joined(separator: "|")
     }
     
     init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        
-        compositeId = try container.decodeIfPresent(String.self, forKey: .compositeId)
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        compositeId = try c.decodeIfPresent(String.self, forKey: .compositeId)
         if let compositeId = compositeId {
             id = compositeId
-        } else if let idString = try? container.decode(String.self, forKey: .id) {
+        } else if let idString = try? c.decode(String.self, forKey: .id) {
             id = idString
-        } else if let idInt = try? container.decode(Int.self, forKey: .id) {
+        } else if let idInt = try? c.decode(Int.self, forKey: .id) {
             id = String(idInt)
         } else {
-            let n = try? container.decodeIfPresent(String.self, forKey: .name)
-            let ct = try? container.decodeIfPresent(String.self, forKey: .createdTime)
-            let dev = try? container.decodeIfPresent(AlertDevice.self, forKey: .device)
-            let sev = try? container.decodeIfPresent(Int.self, forKey: .severity)
-            id = Self.fallbackIdentifier(
-                name: n, createdTime: ct,
-                deviceId: dev?.deviceId, severity: sev
-            )
+            let n = try? c.decodeIfPresent(String.self, forKey: .name)
+            let ct = try? c.decodeIfPresent(String.self, forKey: .createdTime)
+            let dev = try? c.decodeIfPresent(AlertDevice.self, forKey: .device)
+            let sev = try? c.decodeIfPresent(Int.self, forKey: .severity)
+            id = Self.fallbackIdentifier(name: n, createdTime: ct, deviceId: dev?.deviceId, severity: sev)
         }
+        agentId = try c.decodeIfPresent(String.self, forKey: .agentId)
+        name = try c.decodeIfPresent(String.self, forKey: .name)
+        description = try c.decodeIfPresent(String.self, forKey: .description)
+        severity = try c.decodeIfPresent(Int.self, forKey: .severity)
+        status = try c.decodeIfPresent(String.self, forKey: .status)
+        createdTime = try c.decodeIfPresent(String.self, forKey: .createdTime)
+        updatedTime = try c.decodeIfPresent(String.self, forKey: .updatedTime)
+        tactic = try c.decodeIfPresent(String.self, forKey: .tactic)
+        technique = try c.decodeIfPresent(String.self, forKey: .technique)
+        tacticId = try c.decodeIfPresent(String.self, forKey: .tacticId)
+        techniqueId = try c.decodeIfPresent(String.self, forKey: .techniqueId)
+        cid = try c.decodeIfPresent(String.self, forKey: .cid)
+        type = try c.decodeIfPresent(String.self, forKey: .type)
+        scenario = try c.decodeIfPresent(String.self, forKey: .scenario)
+        objective = try c.decodeIfPresent(String.self, forKey: .objective)
         
-        agentId = try container.decodeIfPresent(String.self, forKey: .agentId)
-        
-        name = try container.decodeIfPresent(String.self, forKey: .name)
-        description = try container.decodeIfPresent(String.self, forKey: .description)
-        severity = try container.decodeIfPresent(Int.self, forKey: .severity)
-        status = try container.decodeIfPresent(String.self, forKey: .status)
-        createdTime = try container.decodeIfPresent(String.self, forKey: .createdTime)
-        updatedTime = try container.decodeIfPresent(String.self, forKey: .updatedTime)
-        tactic = try container.decodeIfPresent(String.self, forKey: .tactic)
-        technique = try container.decodeIfPresent(String.self, forKey: .technique)
-        tacticId = try container.decodeIfPresent(String.self, forKey: .tacticId)
-        techniqueId = try container.decodeIfPresent(String.self, forKey: .techniqueId)
-        cid = try container.decodeIfPresent(String.self, forKey: .cid)
-        type = try container.decodeIfPresent(String.self, forKey: .type)
-        scenario = try container.decodeIfPresent(String.self, forKey: .scenario)
-        objective = try container.decodeIfPresent(String.self, forKey: .objective)
-        
-        if let patternIdString = try? container.decodeIfPresent(String.self, forKey: .patternId) {
+        if let patternIdString = try? c.decodeIfPresent(String.self, forKey: .patternId) {
             patternId = patternIdString
-        } else if let patternIdInt = try? container.decodeIfPresent(Int.self, forKey: .patternId) {
+        } else if let patternIdInt = try? c.decodeIfPresent(Int.self, forKey: .patternId) {
             patternId = String(patternIdInt)
         } else {
             patternId = nil
         }
         
-        confidence = try container.decodeIfPresent(Int.self, forKey: .confidence)
-        severityName = try container.decodeIfPresent(String.self, forKey: .severityName)
-        startTime = try container.decodeIfPresent(String.self, forKey: .startTime)
-        endTime = try container.decodeIfPresent(String.self, forKey: .endTime)
+        confidence = try c.decodeIfPresent(Int.self, forKey: .confidence)
+        severityName = try c.decodeIfPresent(String.self, forKey: .severityName)
+        startTime = try c.decodeIfPresent(String.self, forKey: .startTime)
+        endTime = try c.decodeIfPresent(String.self, forKey: .endTime)
         
-        fileName = try container.decodeIfPresent(String.self, forKey: .fileName)
-        filePath = try container.decodeIfPresent(String.self, forKey: .filePath)
-        sha256 = try container.decodeIfPresent(String.self, forKey: .sha256)
-        md5 = try container.decodeIfPresent(String.self, forKey: .md5)
-        commandLine = try container.decodeIfPresent(String.self, forKey: .commandLine)
-        processId = try container.decodeIfPresent(String.self, forKey: .processId)
-        localProcessId = try container.decodeIfPresent(String.self, forKey: .localProcessId)
-        userId = try container.decodeIfPresent(String.self, forKey: .userId)
-        userName = try container.decodeIfPresent(String.self, forKey: .userName)
+        fileName = try c.decodeIfPresent(String.self, forKey: .fileName)
+        filePath = try c.decodeIfPresent(String.self, forKey: .filePath)
+        sha256 = try c.decodeIfPresent(String.self, forKey: .sha256)
+        md5 = try c.decodeIfPresent(String.self, forKey: .md5)
+        commandLine = try c.decodeIfPresent(String.self, forKey: .commandLine)
+        processId = try c.decodeIfPresent(String.self, forKey: .processId)
+        localProcessId = try c.decodeIfPresent(String.self, forKey: .localProcessId)
+        userId = try c.decodeIfPresent(String.self, forKey: .userId)
+        userName = try c.decodeIfPresent(String.self, forKey: .userName)
         
-        parentDetails = try container.decodeIfPresent(AlertProcessDetails.self, forKey: .parentDetails)
-        grandparentDetails = try container.decodeIfPresent(AlertProcessDetails.self, forKey: .grandparentDetails)
+        parentDetails = try c.decodeIfPresent(AlertProcessDetails.self, forKey: .parentDetails)
+        grandparentDetails = try c.decodeIfPresent(AlertProcessDetails.self, forKey: .grandparentDetails)
         
-        localIp = try container.decodeIfPresent(String.self, forKey: .localIp)
-        localPort = try container.decodeIfPresent(Int.self, forKey: .localPort)
-        remoteIp = try container.decodeIfPresent(String.self, forKey: .remoteIp)
-        remotePort = try container.decodeIfPresent(Int.self, forKey: .remotePort)
-        networkProtocol = try container.decodeIfPresent(String.self, forKey: .networkProtocol)
-        networkDirection = try container.decodeIfPresent(String.self, forKey: .networkDirection)
+        localIp = try c.decodeIfPresent(String.self, forKey: .localIp)
+        localPort = try c.decodeIfPresent(Int.self, forKey: .localPort)
+        remoteIp = try c.decodeIfPresent(String.self, forKey: .remoteIp)
+        remotePort = try c.decodeIfPresent(Int.self, forKey: .remotePort)
+        networkProtocol = try c.decodeIfPresent(String.self, forKey: .networkProtocol)
+        networkDirection = try c.decodeIfPresent(String.self, forKey: .networkDirection)
         
-        country = try container.decodeIfPresent(String.self, forKey: .country)
-        city = try container.decodeIfPresent(String.self, forKey: .city)
-        rootSite = try container.decodeIfPresent(String.self, forKey: .rootSite)
-        siteId = try container.decodeIfPresent(String.self, forKey: .siteId)
-        rootMachineDomain = try container.decodeIfPresent(String.self, forKey: .rootMachineDomain)
-        rootOu = try container.decodeIfPresent(String.self, forKey: .rootOu)
+        country = try c.decodeIfPresent(String.self, forKey: .country)
+        city = try c.decodeIfPresent(String.self, forKey: .city)
+        rootSite = try c.decodeIfPresent(String.self, forKey: .rootSite)
+        siteId = try c.decodeIfPresent(String.self, forKey: .siteId)
+        rootMachineDomain = try c.decodeIfPresent(String.self, forKey: .rootMachineDomain)
+        rootOu = try c.decodeIfPresent(String.self, forKey: .rootOu)
         
-        tags = try container.decodeIfPresent([String].self, forKey: .tags)
-        hostGroups = try container.decodeIfPresent([String].self, forKey: .hostGroups)
-        assignedTo = try container.decodeIfPresent(String.self, forKey: .assignedTo)
-        assignedToName = try container.decodeIfPresent(String.self, forKey: .assignedToName)
-        policyId = try container.decodeIfPresent(String.self, forKey: .policyId)
-        policyName = try container.decodeIfPresent(String.self, forKey: .policyName)
+        tags = try c.decodeIfPresent([String].self, forKey: .tags)
+        hostGroups = try c.decodeIfPresent([String].self, forKey: .hostGroups)
+        assignedTo = try c.decodeIfPresent(String.self, forKey: .assignedTo)
+        assignedToName = try c.decodeIfPresent(String.self, forKey: .assignedToName)
+        policyId = try c.decodeIfPresent(String.self, forKey: .policyId)
+        policyName = try c.decodeIfPresent(String.self, forKey: .policyName)
         
-        device = try container.decodeIfPresent(AlertDevice.self, forKey: .device)
+        device = try c.decodeIfPresent(AlertDevice.self, forKey: .device)
     }
     
-    func hash(into hasher: inout Hasher) {
-        hasher.combine(id)
-    }
-    
-    static func == (lhs: Alert, rhs: Alert) -> Bool {
-        lhs.id == rhs.id
-    }
+    func hash(into hasher: inout Hasher) { hasher.combine(id) }
+    static func == (lhs: Alert, rhs: Alert) -> Bool { lhs.id == rhs.id }
     
     var hostname: String? { device?.hostname }
     var deviceId: String? { device?.deviceId }
     var platform: String? { device?.platformName }
     var osVersion: String? { device?.osVersion }
     
-    static func parseISO8601Date(_ string: String) -> Date? {
-        DateUtilities.parseISO8601Date(string)
-    }
+    static func parseISO8601Date(_ string: String) -> Date? { DateUtilities.parseISO8601Date(string) }
     
     var createdDate: Date? {
         guard let createdTime = createdTime else { return nil }
@@ -723,9 +559,7 @@ nonisolated struct Alert: Identifiable, Codable, Hashable, Sendable {
     }
     
     var severityText: String {
-        if let name = severityName, !name.isEmpty {
-            return name
-        }
+        if let name = severityName, !name.isEmpty { return name }
         let severityValue = severity ?? -1
         switch severityValue {
         case 80...100: return "Critical"
@@ -769,22 +603,10 @@ nonisolated struct Alert: Identifiable, Codable, Hashable, Sendable {
         }
     }
     
-    var detectionSourceText: String {
-        return "CrowdStrike Falcon"
-    }
-    
-    var isNetworkAlert: Bool {
-        localIp != nil || remoteIp != nil || localPort != nil || remotePort != nil
-    }
-    
-    var hasProcessInfo: Bool {
-        fileName != nil || commandLine != nil || processId != nil || parentDetails != nil
-    }
-    
-    var hasHostInfo: Bool {
-        device != nil || hostname != nil || deviceId != nil || platform != nil || osVersion != nil
-    }
-    
+    var detectionSourceText: String { return "CrowdStrike Falcon" }
+    var isNetworkAlert: Bool { localIp != nil || remoteIp != nil || localPort != nil || remotePort != nil }
+    var hasProcessInfo: Bool { fileName != nil || commandLine != nil || processId != nil || parentDetails != nil }
+    var hasHostInfo: Bool { device != nil || hostname != nil || deviceId != nil || platform != nil || osVersion != nil }
     var parentFileName: String? { parentDetails?.filename }
     var parentCommandLine: String? { parentDetails?.cmdline }
     
@@ -801,17 +623,9 @@ nonisolated struct Alert: Identifiable, Codable, Hashable, Sendable {
         return parts.isEmpty ? nil : parts.joined(separator: ", ")
     }
     
-    var username: String? {
-        userName ?? parentDetails?.userName
-    }
-    
-    var site: String? {
-        rootSite ?? device?.siteName
-    }
-    
-    var machineDomain: String? {
-        rootMachineDomain ?? device?.machineDomain
-    }
+    var username: String? { userName ?? parentDetails?.userName }
+    var site: String? { rootSite ?? device?.siteName }
+    var machineDomain: String? { rootMachineDomain ?? device?.machineDomain }
     
     var ou: String? {
         if let rootOu = rootOu, !rootOu.isEmpty { return rootOu }
@@ -820,8 +634,6 @@ nonisolated struct Alert: Identifiable, Codable, Hashable, Sendable {
     }
 }
 
-// MARK: - Alert Helpers
-
 nonisolated extension Alert {
     static func isThirdPartyAlertId(_ id: String) -> Bool {
         id.contains(":thirdparty:")
@@ -829,7 +641,6 @@ nonisolated extension Alert {
 }
 
 // MARK: - API Response Models
-
 nonisolated struct HostsResponse: Codable, Sendable {
     let resources: [String]?
     let meta: ResponseMeta?
@@ -872,6 +683,7 @@ nonisolated struct Pagination: Codable, Sendable {
     let total: Int?
     let offset: Int?
     let limit: Int?
+    let after: String?
 }
 
 nonisolated struct APIErrorDetail: Codable, Sendable {
@@ -881,7 +693,6 @@ nonisolated struct APIErrorDetail: Codable, Sendable {
 }
 
 // MARK: - API Error Type
-
 nonisolated enum APIError: Error, LocalizedError, Sendable {
     case notAuthenticated
     case authenticationFailed(statusCode: Int, message: String)
@@ -907,3 +718,4 @@ nonisolated enum APIError: Error, LocalizedError, Sendable {
         }
     }
 }
+

@@ -1,8 +1,3 @@
-//
-//  CrowdStrikeRegion.swift
-//  Crowdstrike-App
-//
-
 import Foundation
 
 nonisolated enum CrowdStrikeRegion: String, CaseIterable, Identifiable, Codable, Sendable {

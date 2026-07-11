@@ -19,6 +19,7 @@ struct SettingsView: View {
                         Task {
                             isTestingConnection = true
                             testConnectionResult = nil
+                            viewModel.errorMessage = nil
                             let success = await viewModel.testConnection()
                             testConnectionResult = success
                             isTestingConnection = false
@@ -37,6 +38,17 @@ struct SettingsView: View {
                                     .foregroundStyle(result ? .green : .red)
                             }
                         }
+                    }
+                    
+                    // Show error or warning message if present
+                    if let result = testConnectionResult, !result, let errorMessage = viewModel.errorMessage {
+                        Text(errorMessage)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    } else if let result = testConnectionResult, result, let errorMessage = viewModel.errorMessage, !errorMessage.isEmpty {
+                        Text(errorMessage)
+                            .font(.caption)
+                            .foregroundStyle(.orange)
                     }
                     
                     Button(role: .destructive) {

@@ -1,8 +1,3 @@
-//
-//  DateUtilities.swift
-//  Crowdstrike-App
-//
-
 import Foundation
 
 nonisolated enum DateUtilities {

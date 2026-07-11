@@ -1,30 +1,16 @@
-//
-//  HostsViewModel.swift
-//  Crowdstrike-App
-//
-//  Created by scotteberg@gmail.com on 2/22/26.
-//
-
 import Foundation
 import SwiftData
 
 @MainActor
 @Observable
 class HostsViewModel {
-    
     private let modelContext: ModelContext
     private let endpointRepository: EndpointRepository
     private let alertRepository: AlertRepository
     
-    // All hosts fetched from API (cache)
     private(set) var allHosts: [HostEntity] = []
-    
-    // All alerts fetched from API (sorted by created date descending)
     private(set) var allAlerts: [AlertEntity] = []
     
-    /// Precomputed lowercased search index keyed by host id. Rebuilt whenever
-    /// `allHosts` changes. Filtering uses this instead of allocating ~15
-    /// `lowercased()` strings per host on every keystroke.
     private var hostSearchIndex: [String: [String]] = [:]
     
     var searchQuery = ""
@@ -85,7 +71,7 @@ class HostsViewModel {
         }
     }
     
-    // MARK: - SwiftData Loading
+    // MARK: - SwiftData Loading (via Repositories)
     
     private func loadCachedData() {
         do {
@@ -97,22 +83,16 @@ class HostsViewModel {
             }
             applyLocalFilter()
             
-            allAlerts = try alertRepository.fetchAllSortedByCreatedDate()
+            let cachedAlerts = try alertRepository.fetchAllSortedByCreatedDate()
+            allAlerts = cachedAlerts
             
-            // Load last refresh timestamp from UserDefaults
             if let refreshDate = UserDefaults.standard.object(forKey: "lastRefresh") as? Date {
                 lastRefresh = refreshDate
             }
             
-            print("Loaded \(cachedHosts.count) cached hosts and \(allAlerts.count) cached alerts from SwiftData")
+            print("Loaded \(cachedHosts.count) cached hosts and \(cachedAlerts.count) cached alerts from SwiftData")
         } catch {
             print("Failed to load cached data: \(error)")
-        }
-    }
-    
-    private func saveLastRefresh() {
-        if let lastRefresh {
-            UserDefaults.standard.set(lastRefresh, forKey: "lastRefresh")
         }
     }
     
@@ -216,18 +196,17 @@ class HostsViewModel {
                 }
             }
             
+            // Batch save via repository
             try endpointRepository.replaceAll(with: hosts)
-            let entities = try endpointRepository.fetchAll()
-            
-            allHosts = entities
+            allHosts = try endpointRepository.fetchAll()
             hostSearchIndex.removeAll(keepingCapacity: true)
-            for entity in entities {
-                hostSearchIndex[entity.id] = entity.searchableFields
+            for host in allHosts {
+                hostSearchIndex[host.id] = host.searchableFields
             }
             
             lastRefresh = Date()
+            UserDefaults.standard.set(lastRefresh, forKey: "lastRefresh")
             applyLocalFilter()
-            saveLastRefresh()
             
             errorMessage = nil
             await refreshAlerts()
@@ -257,17 +236,15 @@ class HostsViewModel {
             }
             
             try endpointRepository.replaceAll(with: hosts)
-            let entities = try endpointRepository.fetchAll()
-            
-            allHosts = entities
+            allHosts = try endpointRepository.fetchAll()
             hostSearchIndex.removeAll(keepingCapacity: true)
-            for entity in entities {
-                hostSearchIndex[entity.id] = entity.searchableFields
+            for host in allHosts {
+                hostSearchIndex[host.id] = host.searchableFields
             }
             
             lastRefresh = Date()
+            UserDefaults.standard.set(lastRefresh, forKey: "lastRefresh")
             applyLocalFilter()
-            saveLastRefresh()
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -302,7 +279,6 @@ class HostsViewModel {
             
             try alertRepository.replaceAll(with: alerts)
             allAlerts = try alertRepository.fetchAllSortedByCreatedDate()
-            saveLastRefresh()
         } catch is CancellationError {
             print("Alert fetch cancelled")
         } catch {
@@ -406,18 +382,23 @@ class HostsViewModel {
     
     func testConnection() async -> Bool {
         do {
-            // First just check if we can authenticate and get a token
             _ = try await apiClient.testConnection()
-            
-            // Now check specific scopes and excessive permissions
             let (canReadHosts, canReadAlerts, scopeError) = await apiClient.checkTokenScopes()
-            if let scopeError {
-                errorMessage = scopeError
-                // If it's just a warning about too many scopes, we might still return true
-                // but it's safer to return false to force the user to fix the misconfiguration.
+            
+            if !canReadHosts || !canReadAlerts {
+                errorMessage = scopeError ?? "Your API token is missing required read permissions."
                 return false
             }
-            return canReadHosts && canReadAlerts
+            
+            if let scopeError {
+                // It connected and can read data, but has too many scopes.
+                // We treat this as a warning, not a hard failure.
+                errorMessage = scopeError
+                return true
+            }
+            
+            errorMessage = nil
+            return true
         } catch {
             errorMessage = error.localizedDescription
             return false
@@ -494,3 +475,4 @@ enum EndpointPlatform: String, CaseIterable, Identifiable {
         }
     }
 }
+
