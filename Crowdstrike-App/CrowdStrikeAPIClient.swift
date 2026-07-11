@@ -9,11 +9,13 @@ actor CrowdStrikeAPIClient {
     private var cachedURLSession: URLSession?
     private var proxyCredentials: (username: String, password: String)?
     private let keychain = KeychainManager.shared
+    private var shouldLogResponses: Bool = false
     
     private init() {}
     
     func updateConfiguration(_ config: AppConfiguration) async {
         self.configuration = config
+        self.shouldLogResponses = config.isDebugModeEnabled
         accessToken = nil
         tokenExpiration = nil
         cachedURLSession?.finishTasksAndInvalidate()
@@ -26,6 +28,7 @@ actor CrowdStrikeAPIClient {
     }
     
     func getConfiguration() -> AppConfiguration { return configuration }
+    func setLoggingEnabled(_ enabled: Bool) { self.shouldLogResponses = enabled }
     
     private func createURLSession() -> URLSession {
         let sessionConfig = URLSessionConfiguration.default
@@ -95,6 +98,22 @@ actor CrowdStrikeAPIClient {
             .replacingOccurrences(of: "=", with: "%3D")
     }
     
+    private func logResponse(_ data: Data, label: String) {
+        guard shouldLogResponses else { return }
+        print("\n" + String(repeating: "=", count: 80))
+        print("=== \(label) ===")
+        print(String(repeating: "=", count: 80))
+        if let jsonString = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let prettyData = try? JSONSerialization.data(withJSONObject: jsonString, options: .prettyPrinted),
+           let prettyString = String(data: prettyData, encoding: .utf8) {
+            print(prettyString)
+        } else if let rawString = String(data: data, encoding: .utf8) {
+            print(rawString)
+        } else {
+            print("[Unable to decode response data]")
+        }
+        print(String(repeating: "=", count: 80) + "\n")
+    }
     
     private func logResponseErrors(_ errors: [APIErrorDetail]?, context: String) {
         guard let errors, !errors.isEmpty else { return }
