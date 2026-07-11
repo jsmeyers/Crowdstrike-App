@@ -559,7 +559,6 @@ actor CrowdStrikeAPIClient {
         var allAlerts: [Alert] = []
         let batchSize = 50
         var errorCount = 0
-        var loggedFirstBatch = false
         let session = urlSession()
         
         for i in stride(from: 0, to: filteredIds.count, by: batchSize) {
@@ -578,10 +577,6 @@ actor CrowdStrikeAPIClient {
             do {
                 let (detailsData, detailsResponse) = try await session.data(for: detailsRequest)
                 let statusCode = (detailsResponse as? HTTPURLResponse)?.statusCode ?? 0
-                if !loggedFirstBatch {
-                    logResponse(detailsData, label: "Alert Details Response (First Batch)")
-                    loggedFirstBatch = true
-                }
                 if statusCode == 200 {
                     let decoder = JSONDecoder()
                     do {
