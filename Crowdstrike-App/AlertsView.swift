@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct AlertsView: View {
-    let rawAlerts: [Alert]
+    let rawAlerts: [AlertEntity]
     var lastRefresh: Date?
     var isRefreshing: Bool = false
     var refreshLoadedCount: Int = 0
@@ -10,7 +10,6 @@ struct AlertsView: View {
     
     var body: some View {
         List {
-            // Refresh status header
             if isRefreshing {
                 Section {
                     HStack {
@@ -59,14 +58,14 @@ struct AlertsView: View {
         .refreshable {
             await onRefresh()
         }
-        .navigationDestination(for: Alert.self) { alert in
+        .navigationDestination(for: AlertEntity.self) { alert in
             AlertDetailView(alert: alert)
         }
     }
 }
 
 struct AlertRow: View {
-    let alert: Alert
+    let alert: AlertEntity
     
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -128,18 +127,20 @@ struct AlertRow: View {
     }
     
     var severityColor: Color {
-        switch alert.severity {
-        case 4, 5: return .red
-        case 3: return .orange
-        case 2: return .yellow
-        case 1: return .blue
+        let severityValue = alert.severity ?? -1
+        switch severityValue {
+        case 80...100: return .red
+        case 60..<80: return .orange
+        case 40..<60: return .yellow
+        case 20..<40: return .blue
+        case 0..<20: return .gray
         default: return .gray
         }
     }
 }
 
 struct AlertDetailView: View {
-    let alert: Alert
+    let alert: AlertEntity
     
     var body: some View {
         ScrollView {
@@ -169,7 +170,7 @@ struct AlertDetailView: View {
                 // Overview Section
                 GroupBox("Overview") {
                     VStack(alignment: .leading, spacing: 8) {
-                        if let description = alert.description {
+                        if let description = alert.alertDescription {
                             Text(description)
                                 .font(.body)
                         }
@@ -341,14 +342,14 @@ struct AlertDetailView: View {
                         if let createdDate = alert.createdDate {
                             LabeledContent("Created", value: createdDate, format: .dateTime)
                         }
-                        if let updatedDate = alert.updatedDate {
-                            LabeledContent("Updated", value: updatedDate, format: .dateTime)
+                        if let updatedTime = alert.updatedTime, let updatedDate = Alert.parseISO8601Date(updatedTime) {
+                             LabeledContent("Updated", value: updatedDate, format: .dateTime)
                         }
-                        if let startDate = alert.startDate {
-                            LabeledContent("Start", value: startDate, format: .dateTime)
+                        if let startTime = alert.startTime, let startDate = Alert.parseISO8601Date(startTime) {
+                             LabeledContent("Start", value: startDate, format: .dateTime)
                         }
-                        if let endDate = alert.endDate {
-                            LabeledContent("End", value: endDate, format: .dateTime)
+                        if let endTime = alert.endTime, let endDate = Alert.parseISO8601Date(endTime) {
+                             LabeledContent("End", value: endDate, format: .dateTime)
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -423,11 +424,13 @@ struct AlertDetailView: View {
     }
     
     var severityColor: Color {
-        switch alert.severity {
-        case 4, 5: return .red
-        case 3: return .orange
-        case 2: return .yellow
-        case 1: return .blue
+        let severityValue = alert.severity ?? -1
+        switch severityValue {
+        case 80...100: return .red
+        case 60..<80: return .orange
+        case 40..<60: return .yellow
+        case 20..<40: return .blue
+        case 0..<20: return .gray
         default: return .gray
         }
     }

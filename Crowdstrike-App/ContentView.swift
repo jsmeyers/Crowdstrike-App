@@ -3,187 +3,217 @@ import SwiftData
 
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
-    @State private var viewModel = HostsViewModel()
+    @State private var viewModel: HostsViewModel?
     @State private var showFilters = false
     
     var body: some View {
-        TabView(selection: $viewModel.selectedTab) {
-            // Endpoints Tab
-            NavigationStack {
-                Group {
-                    if viewModel.isLoading && viewModel.allHosts.isEmpty {
-                        VStack(spacing: 16) {
-                            ProgressView()
-                                .scaleEffect(1.2)
-                            
-                            Text(viewModel.loadingMessage ?? "Loading endpoints...")
-                                .font(.headline)
-                                .foregroundStyle(.primary)
-                            
-                            if viewModel.totalCount > 0 {
-                                VStack(spacing: 8) {
-                                    ProgressView(value: viewModel.loadingProgress)
-                                        .progressViewStyle(.linear)
-                                        .frame(width: 200)
-                                    
-                                    Text("\(viewModel.loadedCount) of \(viewModel.totalCount) endpoints")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
+        Group {
+            if let viewModel = viewModel {
+                TabView(selection: Binding(
+                    get: { viewModel.selectedTab },
+                    set: { viewModel.selectedTab = $0 }
+                )) {
+                    EndpointsTab(viewModel: viewModel, showFilters: $showFilters)
+                        .tabItem {
+                            Label("Endpoints", systemImage: "desktopcomputer")
+                        }
+                        .tag(HostsViewModel.Tab.endpoints)
+                    
+                    AlertsTab(viewModel: viewModel)
+                        .tabItem {
+                            Label("Alerts", systemImage: "exclamationmark.shield")
+                        }
+                        .tag(HostsViewModel.Tab.alerts)
+                    
+                    NavigationStack {
+                        SettingsView(viewModel: viewModel)
+                    }
+                    .tabItem {
+                        Label("Settings", systemImage: "gear")
+                    }
+                }
+                .task {
+                    if viewModel.hasCredentials && viewModel.allHosts.isEmpty {
+                        await viewModel.loadHosts()
+                    }
+                }
+            } else {
+                ProgressView()
+            }
+        }
+        .onAppear {
+            if viewModel == nil {
+                viewModel = HostsViewModel(modelContext: modelContext)
+            }
+        }
+    }
+}
+
+// MARK: - Endpoints Tab
+
+struct EndpointsTab: View {
+    @Bindable var viewModel: HostsViewModel
+    @Binding var showFilters: Bool
+    
+    var body: some View {
+        NavigationStack {
+            Group {
+                if viewModel.isLoading && viewModel.allHosts.isEmpty {
+                    VStack(spacing: 16) {
+                        ProgressView()
+                            .scaleEffect(1.2)
+                        
+                        Text(viewModel.loadingMessage ?? "Loading endpoints...")
+                            .font(.headline)
+                            .foregroundStyle(.primary)
+                        
+                        if viewModel.totalCount > 0 {
+                            VStack(spacing: 8) {
+                                ProgressView(value: viewModel.loadingProgress)
+                                    .progressViewStyle(.linear)
+                                    .frame(width: 200)
+                                
+                                Text("\(viewModel.loadedCount) of \(viewModel.totalCount) endpoints")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
                             }
                         }
-                        .padding()
-                    } else if !viewModel.hasCredentials {
+                    }
+                    .padding()
+                } else if !viewModel.hasCredentials {
+                    ContentUnavailableView {
+                        Label("Not Authenticated", systemImage: "lock.shield")
+                    } description: {
+                        Text("Go to Settings to configure your credentials")
+                    }
+                } else if viewModel.allHosts.isEmpty {
+                    ScrollView {
                         ContentUnavailableView {
-                            Label("Not Authenticated", systemImage: "lock.shield")
+                            Label("No Endpoints", systemImage: "desktopcomputer.trianglebadge.exclamationmark")
                         } description: {
-                            Text("Go to Settings to configure your credentials")
+                            Text("Pull down to refresh or check your credentials")
                         }
-                    } else if viewModel.allHosts.isEmpty {
-                        // Empty state wrapped in ScrollView for pull-to-refresh
-                        ScrollView {
-                            ContentUnavailableView {
-                                Label("No Endpoints", systemImage: "desktopcomputer.trianglebadge.exclamationmark")
-                            } description: {
-                                Text("Pull down to refresh or check your credentials")
-                            }
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        }
-                        .refreshable {
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
+                    .refreshable {
+                        await viewModel.refreshEndpoints()
+                    }
+                } else {
+                    EndpointsListView(
+                        hosts: viewModel.hosts,
+                        searchQuery: $viewModel.searchQuery,
+                        totalCount: viewModel.allHosts.count,
+                        isFilterActive: viewModel.isFilterActive,
+                        lastRefresh: viewModel.lastRefresh,
+                        isRefreshing: viewModel.isRefreshing,
+                        refreshLoadedCount: viewModel.refreshLoadedCount,
+                        refreshTotalCount: viewModel.refreshTotalCount,
+                        onRefresh: {
                             await viewModel.refreshEndpoints()
+                        },
+                        onSearchApply: { query in
+                            viewModel.setSearchQuery(query)
                         }
-                    } else {
-                        EndpointsListView(
-                            hosts: viewModel.hosts,
-                            searchQuery: $viewModel.searchQuery,
-                            totalCount: viewModel.allHosts.count,
-                            isFilterActive: viewModel.isFilterActive,
-                            lastRefresh: viewModel.lastRefresh,
-                            isRefreshing: viewModel.isRefreshing,
-                            refreshLoadedCount: viewModel.refreshLoadedCount,
-                            refreshTotalCount: viewModel.refreshTotalCount,
-                            onRefresh: {
-                                await viewModel.refreshEndpoints()
-                            },
-                            onSearchApply: { query in
-                                viewModel.setSearchQuery(query)
-                            }
-                        )
-                    }
-                }
-                .navigationTitle("Endpoints")
-                .toolbar {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        HStack(spacing: 12) {
-                            if viewModel.isRefreshing {
-                                ProgressView()
-                                    .controlSize(.small)
-                            }
-                            FilterButton(
-                                isActive: viewModel.isFilterActive,
-                                action: { showFilters = true }
-                            )
-                        }
-                    }
-                }
-                .sheet(isPresented: $showFilters) {
-                    EndpointsFilterView(
-                        selectedStatuses: $viewModel.selectedStatuses,
-                        selectedPlatforms: $viewModel.selectedPlatforms,
-                        isPresented: $showFilters,
-                        clearFilters: { viewModel.clearFilters() }
                     )
-                    .presentationDetents([.medium])
-                    .presentationDragIndicator(.visible)
                 }
             }
-            .tabItem {
-                Label("Endpoints", systemImage: "desktopcomputer")
-            }
-            .tag(HostsViewModel.Tab.endpoints)
-            
-            // Alerts Tab
-            NavigationStack {
-                Group {
-                    if viewModel.isLoadingAlerts && viewModel.allAlerts.isEmpty {
-                        VStack(spacing: 16) {
-                            ProgressView()
-                                .scaleEffect(1.2)
-                            
-                            Text("Loading alerts...")
-                                .font(.headline)
-                                .foregroundStyle(.primary)
-                            
-                            if viewModel.alertTotalCount > 0 {
-                                VStack(spacing: 8) {
-                                    ProgressView(value: viewModel.alertLoadingProgress)
-                                        .progressViewStyle(.linear)
-                                        .frame(width: 200)
-                                    
-                                    Text("\(viewModel.alertLoadedCount) of \(viewModel.alertTotalCount) alerts")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                        }
-                        .padding()
-                    } else if !viewModel.hasCredentials {
-                        ContentUnavailableView {
-                            Label("Not Authenticated", systemImage: "lock.shield")
-                        } description: {
-                            Text("Go to Settings to configure your credentials")
-                        }
-                    } else if viewModel.allAlerts.isEmpty {
-                        // Empty state wrapped in ScrollView for pull-to-refresh
-                        ScrollView {
-                            ContentUnavailableView {
-                                Label("No Alerts", systemImage: "checkmark.shield")
-                            } description: {
-                                Text("Pull down to refresh")
-                            }
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        }
-                        .refreshable {
-                            await viewModel.refreshAlertsOnly()
-                        }
-                    } else {
-                        AlertsView(
-                            rawAlerts: viewModel.allAlerts,
-                            lastRefresh: viewModel.lastRefresh,
-                            isRefreshing: viewModel.isLoadingAlerts,
-                            refreshLoadedCount: viewModel.alertLoadedCount,
-                            refreshTotalCount: viewModel.alertTotalCount
-                        ) {
-                            await viewModel.refreshAlertsOnly()
-                        }
-                    }
-                }
-                .navigationTitle("Alerts")
-                .toolbar {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        if viewModel.isLoadingAlerts && !viewModel.allAlerts.isEmpty {
+            .navigationTitle("Endpoints")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    HStack(spacing: 12) {
+                        if viewModel.isRefreshing {
                             ProgressView()
                                 .controlSize(.small)
                         }
+                        FilterButton(
+                            isActive: viewModel.isFilterActive,
+                            action: { showFilters = true }
+                        )
                     }
                 }
             }
-            .tabItem {
-                Label("Alerts", systemImage: "exclamationmark.shield")
-            }
-            .tag(HostsViewModel.Tab.alerts)
-            
-            // Settings Tab
-            NavigationStack {
-                SettingsView(viewModel: viewModel)
-            }
-            .tabItem {
-                Label("Settings", systemImage: "gear")
+            .sheet(isPresented: $showFilters) {
+                EndpointsFilterView(
+                    selectedStatuses: $viewModel.selectedStatuses,
+                    selectedPlatforms: $viewModel.selectedPlatforms,
+                    isPresented: $showFilters,
+                    clearFilters: { viewModel.clearFilters() }
+                )
+                .presentationDetents([.medium])
+                .presentationDragIndicator(.visible)
             }
         }
-        .task {
-            if viewModel.hasCredentials && viewModel.allHosts.isEmpty {
-                await viewModel.loadHosts()
+    }
+}
+
+// MARK: - Alerts Tab
+
+struct AlertsTab: View {
+    let viewModel: HostsViewModel
+    
+    var body: some View {
+        NavigationStack {
+            Group {
+                if viewModel.isLoadingAlerts && viewModel.allAlerts.isEmpty {
+                    VStack(spacing: 16) {
+                        ProgressView()
+                            .scaleEffect(1.2)
+                        
+                        Text("Loading alerts...")
+                            .font(.headline)
+                            .foregroundStyle(.primary)
+                        
+                        if viewModel.alertTotalCount > 0 {
+                            VStack(spacing: 8) {
+                                ProgressView(value: viewModel.alertLoadingProgress)
+                                    .progressViewStyle(.linear)
+                                    .frame(width: 200)
+                                
+                                Text("\(viewModel.alertLoadedCount) of \(viewModel.alertTotalCount) alerts")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    .padding()
+                } else if !viewModel.hasCredentials {
+                    ContentUnavailableView {
+                        Label("Not Authenticated", systemImage: "lock.shield")
+                    } description: {
+                        Text("Go to Settings to configure your credentials")
+                    }
+                } else if viewModel.allAlerts.isEmpty {
+                    ScrollView {
+                        ContentUnavailableView {
+                            Label("No Alerts", systemImage: "checkmark.shield")
+                        } description: {
+                            Text("Pull down to refresh")
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
+                    .refreshable {
+                        await viewModel.refreshAlertsOnly()
+                    }
+                } else {
+                    AlertsView(
+                        rawAlerts: viewModel.allAlerts,
+                        lastRefresh: viewModel.lastRefresh,
+                        isRefreshing: viewModel.isLoadingAlerts,
+                        refreshLoadedCount: viewModel.alertLoadedCount,
+                        refreshTotalCount: viewModel.alertTotalCount
+                    ) {
+                        await viewModel.refreshAlertsOnly()
+                    }
+                }
+            }
+            .navigationTitle("Alerts")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    if viewModel.isLoadingAlerts && !viewModel.allAlerts.isEmpty {
+                        ProgressView()
+                            .controlSize(.small)
+                    }
+                }
             }
         }
     }

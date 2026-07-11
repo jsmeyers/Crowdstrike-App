@@ -9,7 +9,7 @@ import Foundation
 
 // MARK: - API Configuration
 
-enum CrowdStrikeRegion: String, CaseIterable, Identifiable, Codable, Sendable {
+nonisolated enum CrowdStrikeRegion: String, CaseIterable, Identifiable, Codable, Sendable {
     case us1 = "api.crowdstrike.com"
     case us2 = "api.us-2.crowdstrike.com"
     case eu1 = "api.eu-1.crowdstrike.com"
@@ -33,11 +33,13 @@ nonisolated struct OAuthTokenResponse: Codable, Sendable {
     let accessToken: String?
     let expiresIn: Int?
     let tokenType: String?
+    let scope: String?
     
     enum CodingKeys: String, CodingKey {
         case accessToken = "access_token"
         case expiresIn = "expires_in"
         case tokenType = "token_type"
+        case scope
     }
 }
 
@@ -174,11 +176,6 @@ nonisolated struct Host: Identifiable, Codable, Hashable, Sendable {
         self.tags = nil
     }
     
-    /// Derives a stable identifier for a Host when `device_id` is missing, so
-    /// distinct broken records don't collapse to a single `"unknown"` ID
-    /// (which would break `Identifiable`/`Hashable` in SwiftUI lists and cause
-    /// duplicate-row glitches). The value is content-derived so it stays
-    /// stable across decodes/launches for the same record.
     private static func fallbackIdentifier(
         hostname: String?,
         localIp: String?,
@@ -189,8 +186,6 @@ nonisolated struct Host: Identifiable, Codable, Hashable, Sendable {
         let parts = [hostname, localIp, externalIp, macAddress, firstSeen]
             .compactMap { $0?.isEmpty == false ? $0 : nil }
         if parts.isEmpty {
-            // Degenerate case: nothing to derive from. Use a UUID so at least
-            // multiple such records don't collide within a session.
             return "unknown-\(UUID().uuidString)"
         }
         return "unknown:" + parts.joined(separator: "|")
@@ -204,9 +199,6 @@ nonisolated struct Host: Identifiable, Codable, Hashable, Sendable {
         } else if let deviceIdInt = try? container.decode(Int.self, forKey: .id) {
             id = String(deviceIdInt)
         } else {
-            // Derive a stable fallback from identifying fields so duplicate
-            // "unknown" IDs don't collapse distinct records. Re-decoding here
-            // is cheap and only runs on the rare missing-id path.
             let hn = try? container.decodeIfPresent(String.self, forKey: .hostname)
             let lip = try? container.decodeIfPresent(String.self, forKey: .localIp)
             let eip = try? container.decodeIfPresent(String.self, forKey: .externalIp)
@@ -314,9 +306,6 @@ nonisolated struct Host: Identifiable, Codable, Hashable, Sendable {
     
     var displayName: String { hostname ?? "Unknown Host" }
     
-    /// Lowercased searchable field values for this host. Used to precompute a
-    /// search index in the view model so filtering doesn't allocate ~15
-    /// `lowercased()` strings per host on every keystroke.
     var searchableFields: [String] {
         var fields: [String] = []
         fields.append(displayName.lowercased())
@@ -339,10 +328,6 @@ nonisolated struct Host: Identifiable, Codable, Hashable, Sendable {
         return fields
     }
     
-    // MARK: - Shared Date Formatters
-    
-    /// Formatter that accepts fractional seconds. ISO8601DateFormatter is thread-safe,
-    /// so a single shared instance avoids per-row allocation during decode/display.
     private static let iso8601WithFractional: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -355,7 +340,7 @@ nonisolated struct Host: Identifiable, Codable, Hashable, Sendable {
         return formatter
     }()
     
-    private static func parseISO8601Date(_ string: String) -> Date? {
+    static func parseISO8601Date(_ string: String) -> Date? {
         if let date = iso8601WithFractional.date(from: string) { return date }
         return iso8601WithoutFractional.date(from: string)
     }
@@ -524,7 +509,6 @@ nonisolated struct Alert: Identifiable, Codable, Hashable, Sendable {
     let startTime: String?
     let endTime: String?
     
-    // Process details (at root level)
     let fileName: String?
     let filePath: String?
     let sha256: String?
@@ -535,11 +519,9 @@ nonisolated struct Alert: Identifiable, Codable, Hashable, Sendable {
     let userId: String?
     let userName: String?
     
-    // Parent/Grandparent process details
     let parentDetails: AlertProcessDetails?
     let grandparentDetails: AlertProcessDetails?
     
-    // Network details
     let localIp: String?
     let localPort: Int?
     let remoteIp: String?
@@ -547,7 +529,6 @@ nonisolated struct Alert: Identifiable, Codable, Hashable, Sendable {
     let networkProtocol: String?
     let networkDirection: String?
     
-    // Location/Org details (at root level for some alerts)
     let country: String?
     let city: String?
     let rootSite: String?
@@ -555,7 +536,6 @@ nonisolated struct Alert: Identifiable, Codable, Hashable, Sendable {
     let rootMachineDomain: String?
     let rootOu: String?
     
-    // Tags and grouping
     let tags: [String]?
     let hostGroups: [String]?
     let assignedTo: String?
@@ -563,10 +543,8 @@ nonisolated struct Alert: Identifiable, Codable, Hashable, Sendable {
     let policyId: String?
     let policyName: String?
     
-    // Nested device object - contains host information
     let device: AlertDevice?
     
-    // Computed ID from composite_id
     let compositeId: String?
     let agentId: String?
     
@@ -592,7 +570,6 @@ nonisolated struct Alert: Identifiable, Codable, Hashable, Sendable {
         case startTime = "timestamp"
         case endTime = "process_end_time"
         
-        // Process details
         case fileName = "filename"
         case filePath = "filepath"
         case sha256
@@ -603,11 +580,9 @@ nonisolated struct Alert: Identifiable, Codable, Hashable, Sendable {
         case userId = "user_id"
         case userName = "user_name"
         
-        // Parent/Grandparent
         case parentDetails = "parent_details"
         case grandparentDetails = "grandparent_details"
         
-        // Network
         case localIp = "local_ip"
         case localPort = "local_port"
         case remoteIp = "remote_ip"
@@ -615,7 +590,6 @@ nonisolated struct Alert: Identifiable, Codable, Hashable, Sendable {
         case networkProtocol = "protocol"
         case networkDirection
         
-        // Location
         case country
         case city
         case rootSite = "site"
@@ -623,7 +597,6 @@ nonisolated struct Alert: Identifiable, Codable, Hashable, Sendable {
         case rootMachineDomain = "machine_domain"
         case rootOu = "ou"
         
-        // Tags
         case tags
         case hostGroups = "host_groups"
         case assignedTo = "assigned_to"
@@ -631,15 +604,11 @@ nonisolated struct Alert: Identifiable, Codable, Hashable, Sendable {
         case policyId = "policy_id"
         case policyName = "policy_name"
         
-        // Device
         case device
         case compositeId = "composite_id"
         case agentId = "agent_id"
     }
     
-    /// Derives a stable identifier for an Alert when both `composite_id` and
-    /// `id` are missing, so distinct broken records don't collapse to a single
-    /// `"unknown"` ID (which would break `Identifiable`/`Hashable` in SwiftUI).
     private static func fallbackIdentifier(
         name: String?,
         createdTime: String?,
@@ -660,7 +629,6 @@ nonisolated struct Alert: Identifiable, Codable, Hashable, Sendable {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         
-        // Handle ID - use composite_id if available, otherwise fall back
         compositeId = try container.decodeIfPresent(String.self, forKey: .compositeId)
         if let compositeId = compositeId {
             id = compositeId
@@ -669,9 +637,6 @@ nonisolated struct Alert: Identifiable, Codable, Hashable, Sendable {
         } else if let idInt = try? container.decode(Int.self, forKey: .id) {
             id = String(idInt)
         } else {
-            // Derive a stable fallback so duplicate "unknown" IDs don't collapse
-            // distinct records. Re-decoding here is cheap and only runs on the
-            // rare missing-id path.
             let n = try? container.decodeIfPresent(String.self, forKey: .name)
             let ct = try? container.decodeIfPresent(String.self, forKey: .createdTime)
             let dev = try? container.decodeIfPresent(AlertDevice.self, forKey: .device)
@@ -684,7 +649,6 @@ nonisolated struct Alert: Identifiable, Codable, Hashable, Sendable {
         
         agentId = try container.decodeIfPresent(String.self, forKey: .agentId)
         
-        // Basic fields
         name = try container.decodeIfPresent(String.self, forKey: .name)
         description = try container.decodeIfPresent(String.self, forKey: .description)
         severity = try container.decodeIfPresent(Int.self, forKey: .severity)
@@ -700,7 +664,6 @@ nonisolated struct Alert: Identifiable, Codable, Hashable, Sendable {
         scenario = try container.decodeIfPresent(String.self, forKey: .scenario)
         objective = try container.decodeIfPresent(String.self, forKey: .objective)
         
-        // Handle patternId as either String or Int
         if let patternIdString = try? container.decodeIfPresent(String.self, forKey: .patternId) {
             patternId = patternIdString
         } else if let patternIdInt = try? container.decodeIfPresent(Int.self, forKey: .patternId) {
@@ -714,7 +677,6 @@ nonisolated struct Alert: Identifiable, Codable, Hashable, Sendable {
         startTime = try container.decodeIfPresent(String.self, forKey: .startTime)
         endTime = try container.decodeIfPresent(String.self, forKey: .endTime)
         
-        // Process details
         fileName = try container.decodeIfPresent(String.self, forKey: .fileName)
         filePath = try container.decodeIfPresent(String.self, forKey: .filePath)
         sha256 = try container.decodeIfPresent(String.self, forKey: .sha256)
@@ -725,11 +687,9 @@ nonisolated struct Alert: Identifiable, Codable, Hashable, Sendable {
         userId = try container.decodeIfPresent(String.self, forKey: .userId)
         userName = try container.decodeIfPresent(String.self, forKey: .userName)
         
-        // Parent/Grandparent
         parentDetails = try container.decodeIfPresent(AlertProcessDetails.self, forKey: .parentDetails)
         grandparentDetails = try container.decodeIfPresent(AlertProcessDetails.self, forKey: .grandparentDetails)
         
-        // Network
         localIp = try container.decodeIfPresent(String.self, forKey: .localIp)
         localPort = try container.decodeIfPresent(Int.self, forKey: .localPort)
         remoteIp = try container.decodeIfPresent(String.self, forKey: .remoteIp)
@@ -737,7 +697,6 @@ nonisolated struct Alert: Identifiable, Codable, Hashable, Sendable {
         networkProtocol = try container.decodeIfPresent(String.self, forKey: .networkProtocol)
         networkDirection = try container.decodeIfPresent(String.self, forKey: .networkDirection)
         
-        // Location
         country = try container.decodeIfPresent(String.self, forKey: .country)
         city = try container.decodeIfPresent(String.self, forKey: .city)
         rootSite = try container.decodeIfPresent(String.self, forKey: .rootSite)
@@ -745,7 +704,6 @@ nonisolated struct Alert: Identifiable, Codable, Hashable, Sendable {
         rootMachineDomain = try container.decodeIfPresent(String.self, forKey: .rootMachineDomain)
         rootOu = try container.decodeIfPresent(String.self, forKey: .rootOu)
         
-        // Tags
         tags = try container.decodeIfPresent([String].self, forKey: .tags)
         hostGroups = try container.decodeIfPresent([String].self, forKey: .hostGroups)
         assignedTo = try container.decodeIfPresent(String.self, forKey: .assignedTo)
@@ -753,11 +711,9 @@ nonisolated struct Alert: Identifiable, Codable, Hashable, Sendable {
         policyId = try container.decodeIfPresent(String.self, forKey: .policyId)
         policyName = try container.decodeIfPresent(String.self, forKey: .policyName)
         
-        // Device - nested object with host info
         device = try container.decodeIfPresent(AlertDevice.self, forKey: .device)
     }
     
-    // Hashable conformance
     func hash(into hasher: inout Hasher) {
         hasher.combine(id)
     }
@@ -766,14 +722,10 @@ nonisolated struct Alert: Identifiable, Codable, Hashable, Sendable {
         lhs.id == rhs.id
     }
     
-    // MARK: - Computed Properties (pull from device if available)
-    
     var hostname: String? { device?.hostname }
     var deviceId: String? { device?.deviceId }
     var platform: String? { device?.platformName }
     var osVersion: String? { device?.osVersion }
-    
-    // MARK: - Shared Date Formatters
     
     private static let iso8601WithFractional: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
@@ -787,7 +739,7 @@ nonisolated struct Alert: Identifiable, Codable, Hashable, Sendable {
         return formatter
     }()
     
-    private static func parseISO8601Date(_ string: String) -> Date? {
+    static func parseISO8601Date(_ string: String) -> Date? {
         if let date = iso8601WithFractional.date(from: string) { return date }
         return iso8601WithoutFractional.date(from: string)
     }
@@ -870,7 +822,6 @@ nonisolated struct Alert: Identifiable, Codable, Hashable, Sendable {
     }
     
     var detectionSourceText: String {
-        // Could be extended based on source_products or other fields
         return "CrowdStrike Falcon"
     }
     
@@ -890,7 +841,6 @@ nonisolated struct Alert: Identifiable, Codable, Hashable, Sendable {
     var parentCommandLine: String? { parentDetails?.cmdline }
     
     var locationText: String? {
-        // Check device first, then root level
         if let device = device {
             var parts: [String] = []
             if let city = device.city, !city.isEmpty { parts.append(city) }
@@ -925,15 +875,6 @@ nonisolated struct Alert: Identifiable, Codable, Hashable, Sendable {
 // MARK: - Alert Helpers
 
 nonisolated extension Alert {
-    /// Returns true if the composite ID indicates a third-party-sourced alert.
-    ///
-    /// CrowdStrike embeds `:thirdparty:` in composite IDs for alerts sourced
-    /// from integrations rather than native Falcon detections. This is used to
-    /// filter those out when the user only wants to see native detections.
-    ///
-    /// Note: this is a client-side heuristic based on the documented ID format.
-    /// If CrowdStrike changes the format, this helper is the single place to
-    /// update.
     static func isThirdPartyAlertId(_ id: String) -> Bool {
         id.contains(":thirdparty:")
     }
@@ -1028,43 +969,26 @@ actor CrowdStrikeAPIClient {
     private var configuration: AppConfiguration = .default
     private var accessToken: String?
     private var tokenExpiration: Date?
+    private var tokenScopes: [String] = []
     
-    /// Coalesces concurrent token-refresh attempts so multiple in-flight requests
-    /// don't each trigger a separate `authenticate` call.
     private var tokenRefreshTask: Task<Void, Error>?
-    
-    /// Cached URLSession. Reused across requests; invalidated/recreated when the
-    /// configuration changes (proxy, timeouts). Creating a session per request is
-    /// expensive because it spins up connection pools and proxy evaluation.
     private var cachedURLSession: URLSession?
-    
-    /// Proxy credentials fetched from the keychain during `updateConfiguration`.
-    /// Stored here so the synchronous `createURLSession` can use them without
-    /// needing to await keychain access on every session build.
     private var proxyCredentials: (username: String, password: String)?
     
     private let keychain = KeychainManager.shared
     
-    /// Set to true to log raw API responses to the console for debugging
     private var shouldLogResponses: Bool = false
     
     private init() {}
-    
-    // MARK: - Configuration
     
     func updateConfiguration(_ config: AppConfiguration) async {
         self.configuration = config
         self.shouldLogResponses = config.isDebugModeEnabled
         accessToken = nil
         tokenExpiration = nil
-        // Drop the cached session so the next request builds one with the new
-        // proxy/timeout settings. Let any in-flight tasks finish naturally.
         cachedURLSession?.finishTasksAndInvalidate()
         cachedURLSession = nil
         
-        // Fetch proxy credentials from the keychain if proxy auth is enabled.
-        // This keeps secrets out of UserDefaults (where AppConfiguration lives)
-        // and makes them available to the synchronous createURLSession().
         if config.proxy.isEnabled && config.proxy.requiresAuth {
             self.proxyCredentials = try? await keychain.retrieveProxyCredentials()
         } else {
@@ -1079,8 +1003,6 @@ actor CrowdStrikeAPIClient {
     func setLoggingEnabled(_ enabled: Bool) {
         self.shouldLogResponses = enabled
     }
-    
-    // MARK: - URL Session Configuration
     
     private func createURLSession() -> URLSession {
         let sessionConfig = URLSessionConfiguration.default
@@ -1111,7 +1033,6 @@ actor CrowdStrikeAPIClient {
         return URLSession(configuration: sessionConfig)
     }
     
-    /// Returns the cached session, creating it lazily on first use.
     private func urlSession() -> URLSession {
         if let cachedURLSession { return cachedURLSession }
         let new = createURLSession()
@@ -1119,19 +1040,13 @@ actor CrowdStrikeAPIClient {
         return new
     }
     
-    // MARK: - Proxy Credentials Management
-    
-    /// Stores proxy credentials in the keychain and refreshes the cached values.
-    /// Call this from the UI when the user edits proxy auth settings.
     func setProxyCredentials(username: String, password: String) async throws {
         try await keychain.storeProxyCredentials(username: username, password: password)
         self.proxyCredentials = (username, password)
-        // Invalidate the cached session so the next request rebuilds with new creds
         cachedURLSession?.finishTasksAndInvalidate()
         cachedURLSession = nil
     }
     
-    /// Removes proxy credentials from the keychain and clears the cached values.
     func clearProxyCredentials() async throws {
         try await keychain.deleteProxyCredentials()
         self.proxyCredentials = nil
@@ -1139,23 +1054,14 @@ actor CrowdStrikeAPIClient {
         cachedURLSession = nil
     }
     
-    // MARK: - Auth State Management
-    
-    /// Clears in-memory auth state and any in-flight token refresh. Called on
-    /// logout so the client drops the access token immediately rather than
-    /// waiting for the next `ensureValidToken` to discover missing keychain
-    /// credentials.
     func clearAuthState() {
         accessToken = nil
         tokenExpiration = nil
+        tokenScopes = []
         tokenRefreshTask?.cancel()
         tokenRefreshTask = nil
     }
     
-    // MARK: - Helper Methods
-    
-    /// Returns a non-optional `Authorization` header value, throwing if no valid
-    /// token is present. Replaces force-unwrapped `accessToken!` usage at call sites.
     private func authorizationHeader() throws -> String {
         guard let token = accessToken, !token.isEmpty else {
             throw APIErrorType.notAuthenticated
@@ -1163,21 +1069,15 @@ actor CrowdStrikeAPIClient {
         return "Bearer \(token)"
     }
     
-    /// Properly encodes an FQL filter string for use in a URL query parameter.
-    /// The + character (AND operator in FQL) must be encoded as %2B, otherwise
-    /// it gets interpreted as a space by the server.
     private func encodeFQLFilter(_ filter: String) -> String {
         guard let encoded = filter.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else {
             return filter
         }
-        // + must be %2B in URL query strings, otherwise it's interpreted as a space
-        // Also encode = as %3D to avoid any ambiguity
         return encoded
             .replacingOccurrences(of: "+", with: "%2B")
             .replacingOccurrences(of: "=", with: "%3D")
     }
     
-    /// Logs API response data to the console in a formatted way
     private func logResponse(_ data: Data, label: String) {
         guard shouldLogResponses else { return }
         
@@ -1198,9 +1098,6 @@ actor CrowdStrikeAPIClient {
         print(String(repeating: "=", count: 80) + "\n")
     }
     
-    /// Logs any `errors` entries returned in a 200 response body. CrowdStrike can
-    /// return HTTP 200 with a populated `errors` array, so this surfaces them
-    /// instead of silently ignoring partial failures.
     private func logResponseErrors(_ errors: [APIErrorDetail]?, context: String) {
         guard let errors, !errors.isEmpty else { return }
         for error in errors {
@@ -1208,16 +1105,12 @@ actor CrowdStrikeAPIClient {
         }
     }
     
-    // MARK: - Authentication
-    
     func authenticate(clientId: String, clientSecret: String) async throws {
         var request = URLRequest(url: URL(string: "\(configuration.baseURLWithProtocol)/oauth2/token")!)
         request.httpMethod = "POST"
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
         request.timeoutInterval = configuration.connectionTimeout
         
-        // Percent-encode each value so a client ID/secret containing reserved
-        // characters (e.g. &, =) doesn't corrupt the form body.
         let encodedClientId = clientId.addingPercentEncoding(
             withAllowedCharacters: .urlQueryAllowed
         ) ?? clientId
@@ -1250,6 +1143,7 @@ actor CrowdStrikeAPIClient {
         let expiresIn = tokenResponse.expiresIn ?? 1800
         self.accessToken = token
         self.tokenExpiration = Date().addingTimeInterval(TimeInterval(expiresIn - 60))
+        self.tokenScopes = tokenResponse.scope?.split(separator: " ").map(String.init) ?? []
         
         try await keychain.storeCredentials(clientId: clientId, clientSecret: clientSecret)
         try await keychain.deleteBearerToken()
@@ -1258,6 +1152,7 @@ actor CrowdStrikeAPIClient {
     func setBearerToken(_ token: String) async throws {
         self.accessToken = token
         self.tokenExpiration = Date().addingTimeInterval(3600)
+        self.tokenScopes = [] // Bearer tokens don't return scopes via this flow
         try await keychain.storeBearerToken(token)
         try await keychain.deleteCredentials()
     }
@@ -1271,14 +1166,11 @@ actor CrowdStrikeAPIClient {
         return try? await keychain.retrieveBearerToken()
     }
     
-    /// Refreshes the access token using the configured auth method. Called by
-    /// `ensureValidToken`, which coalesces concurrent callers onto a single refresh.
     private func refreshToken() async throws {
         switch configuration.authMethod {
         case .oauth:
             if let (clientId, clientSecret) = try? await keychain.retrieveCredentials() {
                 try await authenticate(clientId: clientId, clientSecret: clientSecret)
-                // Restore logging setting after re-auth
                 self.shouldLogResponses = configuration.isDebugModeEnabled
             } else {
                 throw APIErrorType.notAuthenticated
@@ -1296,7 +1188,6 @@ actor CrowdStrikeAPIClient {
     private func ensureValidToken() async throws {
         if isAuthenticated() { return }
         
-        // If a refresh is already in flight, await it instead of starting another.
         if let existing = tokenRefreshTask {
             try await existing.value
             return
@@ -1311,12 +1202,68 @@ actor CrowdStrikeAPIClient {
         try await task.value
     }
     
-    // MARK: - Hosts API
+    // MARK: - Token Scopes Check
+    
+    /// Checks if the current token has the necessary scopes for Hosts and Alerts,
+    /// and verifies it doesn't have excessive permissions (principle of least privilege).
+    func checkTokenScopes() async -> (canReadHosts: Bool, canReadAlerts: Bool, errorMessage: String?) {
+        try? await ensureValidToken()
+        guard isAuthenticated() else {
+            return (false, false, "Not authenticated. Please log in.")
+        }
+        
+        let session = urlSession()
+        
+        // Check Hosts (Device API: Read)
+        let hostsUrl = URL(string: "\(configuration.baseURLWithProtocol)/devices/queries/devices/v1?limit=1")!
+        var hostsRequest = URLRequest(url: hostsUrl)
+        hostsRequest.setValue(try? authorizationHeader(), forHTTPHeaderField: "Authorization")
+        hostsRequest.timeoutInterval = configuration.connectionTimeout
+        
+        var canReadHosts = false
+        if let (_, response) = try? await session.data(for: hostsRequest),
+           let httpResponse = response as? HTTPURLResponse {
+            canReadHosts = httpResponse.statusCode == 200
+        }
+        
+        // Check Alerts (Alerts API: Read)
+        let alertsUrl = URL(string: "\(configuration.baseURLWithProtocol)/alerts/queries/alerts/v2?limit=1")!
+        var alertsRequest = URLRequest(url: alertsUrl)
+        alertsRequest.setValue(try? authorizationHeader(), forHTTPHeaderField: "Authorization")
+        alertsRequest.timeoutInterval = configuration.connectionTimeout
+        
+        var canReadAlerts = false
+        if let (_, response) = try? await session.data(for: alertsRequest),
+           let httpResponse = response as? HTTPURLResponse {
+            canReadAlerts = httpResponse.statusCode == 200
+        }
+        
+        // Check for too many permissions (least privilege)
+        var scopeWarning: String? = nil
+        if !tokenScopes.isEmpty {
+            // Define the allowed scopes for this app.
+            let allowedScopes: Set<String> = ["hosts.read", "alerts.read", "device.read", "oauth", "oauth2"]
+            let unexpectedScopes = tokenScopes.filter { !allowedScopes.contains($0.lowercased()) }
+            if !unexpectedScopes.isEmpty {
+                scopeWarning = "Security Warning: Your API token has more permissions than required. Unexpected scopes found: \(unexpectedScopes.joined(separator: ", ")). Please restrict the API client to only 'Hosts: Read' and 'Alerts: Read'."
+            }
+        }
+        
+        let errorMessage: String?
+        if !canReadHosts || !canReadAlerts {
+            errorMessage = "Your API token is missing required permissions. Please ensure 'Device API: Read' and 'Alerts API: Read' scopes are enabled in CrowdStrike."
+        } else if let scopeWarning {
+            errorMessage = scopeWarning
+        } else {
+            errorMessage = nil
+        }
+        
+        return (canReadHosts, canReadAlerts, errorMessage)
+    }
     
     private func searchHostsPage(query: String?, offset: Int?, limit: Int) async throws -> (hostIds: [String], nextOffset: Int?, total: Int?) {
         try await ensureValidToken()
         
-        // Build URL string manually to handle FQL filter encoding properly
         var urlString = "\(configuration.baseURLWithProtocol)/devices/queries/devices/v1?limit=\(limit)"
         
         if let query = query, !query.isEmpty {
@@ -1379,7 +1326,6 @@ actor CrowdStrikeAPIClient {
         do {
             return try JSONDecoder().decode(HostDetailsResponse.self, from: data).resources ?? []
         } catch {
-            // Surface decode failures instead of silently returning [].
             throw APIErrorType.decodingError(error)
         }
     }
@@ -1387,7 +1333,6 @@ actor CrowdStrikeAPIClient {
     func searchAndRetrieveHostsWithProgress(query: String?, progressHandler: @escaping (Int, Int) -> Void) async throws -> [Host] {
         try await ensureValidToken()
         
-        // Build URL string manually to handle FQL filter encoding properly
         var countUrlString = "\(configuration.baseURLWithProtocol)/devices/queries/devices/v1?limit=1"
         if let query = query, !query.isEmpty {
             countUrlString += "&filter=\(encodeFQLFilter(query))"
@@ -1419,7 +1364,6 @@ actor CrowdStrikeAPIClient {
         var currentOffset: Int? = nil
         let limit = 500
         
-        // ID fetching represents roughly the first half of progress.
         let halfTotal = totalCount / 2
         
         while true {
@@ -1427,7 +1371,6 @@ actor CrowdStrikeAPIClient {
             let (hostIds, nextOffset, _) = try await searchHostsPage(query: query, offset: currentOffset, limit: limit)
             allHostIds.append(contentsOf: hostIds)
             currentOffset = nextOffset
-            // Report 0–50% during the ID-fetch phase.
             progressHandler(min(allHostIds.count, halfTotal), totalCount)
             
             if nextOffset == nil || hostIds.isEmpty {
@@ -1448,7 +1391,6 @@ actor CrowdStrikeAPIClient {
             
             let hosts = try await getHostDetailsBatch(hostIds: batchIds)
             allHosts.append(contentsOf: hosts)
-            // Report 50–100% during the detail-fetch phase, scaled by batch progress.
             let detailProgress = halfTotal + Int((Double(batchEnd) / Double(detailDenominator)) * Double(halfTotal))
             progressHandler(detailProgress, totalCount)
         }
@@ -1457,9 +1399,6 @@ actor CrowdStrikeAPIClient {
         return allHosts
     }
     
-    // MARK: - Alerts API
-    
-    /// Queries a single page of alert IDs for the given FQL filter.
     private func queryAlertIdsPage(filterString: String, limit: Int, offset: Int?) async throws -> (ids: [String], nextOffset: Int?, total: Int?) {
         try await ensureValidToken()
         
@@ -1495,29 +1434,22 @@ actor CrowdStrikeAPIClient {
     func fetchAlerts(limit: Int = 500, minSeverity: Int? = 55, since: Date? = nil, filterThirdParty: Bool = true, progressHandler: @escaping (Int, Int) -> Void = { _, _ in }) async throws -> [Alert] {
         try await ensureValidToken()
         
-        // Build filter string with + as AND operator in FQL
         var filters: [String] = []
         
-        // Add severity filter (crowdStrike uses 0-100 scale in alerts API)
-        // Note: severity is an integer field and must NOT be quoted
         if let minSeverity {
             filters.append("severity:>=\(minSeverity)")
         }
         
-        // Add time filter for alerts created since the specified date (default: last 7 days)
-        // Note: timestamps are string fields and MUST be quoted
         let sinceDate = since ?? Date().addingTimeInterval(-7 * 24 * 60 * 60)
         let isoFormatter = ISO8601DateFormatter()
         isoFormatter.formatOptions = [.withInternetDateTime]
         let sinceString = isoFormatter.string(from: sinceDate)
         filters.append("created_timestamp:>='\(sinceString)'")
         
-        // Join filters with + (AND operator in FQL)
         let filterString = filters.joined(separator: "+")
         
         print("Alerts API filter: \(filterString)")
         
-        // Paginate through ALL alert IDs (previously only the first page was fetched).
         var allAlertIds: [String] = []
         var currentOffset: Int? = nil
         var totalCount = 0
@@ -1540,8 +1472,6 @@ actor CrowdStrikeAPIClient {
         
         print("Fetched \(allAlertIds.count) total alert IDs from API")
         
-        // Filter out third-party alerts if user has selected that option.
-        // Uses the documented `:thirdparty:` marker in composite IDs.
         let filteredIds: [String]
         if filterThirdParty {
             let thirdPartyCount = allAlertIds.filter { Alert.isThirdPartyAlertId($0) }.count
@@ -1589,7 +1519,6 @@ actor CrowdStrikeAPIClient {
                 let (detailsData, detailsResponse) = try await session.data(for: detailsRequest)
                 let statusCode = (detailsResponse as? HTTPURLResponse)?.statusCode ?? 0
                 
-                // Log the first batch response in detail for inspection
                 if !loggedFirstBatch {
                     logResponse(detailsData, label: "Alert Details Response (First Batch)")
                     loggedFirstBatch = true
@@ -1619,8 +1548,6 @@ actor CrowdStrikeAPIClient {
                     errorCount += 1
                 }
             } catch is CancellationError {
-                // Propagate cancellation cleanly so callers (and structured
-                // concurrency) can react to it instead of treating it as an error.
                 print("Alert fetch cancelled")
                 throw CancellationError()
             } catch {
@@ -1629,7 +1556,6 @@ actor CrowdStrikeAPIClient {
             }
         }
         
-        // Client-side severity filter as fallback (in case API filter doesn't work as expected)
         if let minSeverity {
             let beforeCount = allAlerts.count
             allAlerts = allAlerts.filter { ($0.severity ?? 0) >= minSeverity }
@@ -1642,8 +1568,6 @@ actor CrowdStrikeAPIClient {
         print("Total alerts retrieved: \(allAlerts.count), errors encountered: \(errorCount)")
         return allAlerts
     }
-    
-    // MARK: - Connection Test
     
     func testConnection() async throws -> Bool {
         try await ensureValidToken()

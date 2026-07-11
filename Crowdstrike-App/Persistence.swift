@@ -132,6 +132,10 @@ final class HostEntity {
         if let groupIds { fields.append(contentsOf: groupIds.map { $0.lowercased() }) }
         return fields
     }
+    
+    var groups: [HostGroup] {
+        (groupIds ?? []).map { HostGroup(id: $0, name: nil) }
+    }
 }
 
 // MARK: - Alert Entity (SwiftData)

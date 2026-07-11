@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct HostDetailView: View {
-    let host: Host
+    let host: HostEntity
     
     var body: some View {
         ScrollView {
@@ -159,10 +159,10 @@ struct HostDetailView: View {
                 }
                 
                 // Groups
-                if let groups = host.groups, !groups.isEmpty {
+                if !host.groups.isEmpty {
                     GroupBox("Host Groups") {
                         VStack(alignment: .leading, spacing: 4) {
-                            ForEach(groups, id: \.id) { group in
+                            ForEach(host.groups, id: \.id) { group in
                                 HStack {
                                     Image(systemName: "person.3.fill")
                                         .foregroundStyle(.secondary)

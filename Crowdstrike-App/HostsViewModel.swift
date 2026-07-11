@@ -6,67 +6,57 @@
 //
 
 import Foundation
+import SwiftData
 
 @MainActor
 @Observable
 class HostsViewModel {
     
+    private let modelContext: ModelContext
+    
     // All hosts fetched from API (cache)
-    private(set) var allHosts: [Host] = []
+    private(set) var allHosts: [HostEntity] = []
     
     // All alerts fetched from API (sorted by created date descending)
-    private(set) var allAlerts: [Alert] = []
+    private(set) var allAlerts: [AlertEntity] = []
     
     /// Precomputed lowercased search index keyed by host id. Rebuilt whenever
-    /// `allHosts` changes (via `setAllHosts`). Filtering uses this instead of
-    /// allocating ~15 `lowercased()` strings per host on every keystroke.
+    /// `allHosts` changes. Filtering uses this instead of allocating ~15
+    /// `lowercased()` strings per host on every keystroke.
     private var hostSearchIndex: [String: [String]] = [:]
     
-    // Search query - updated explicitly via `setSearchQuery(_:)` (typically
-    // debounced by the view). Filtering is NOT triggered in a `didSet` so the
-    // view can own debounce timing and avoid double-filtering.
     var searchQuery = ""
     
-    // Filter state
     var selectedStatuses: Set<EndpointStatus> = [] {
-        didSet {
-            applyLocalFilter()
-        }
+        didSet { applyLocalFilter() }
     }
     
     var selectedPlatforms: Set<EndpointPlatform> = [] {
-        didSet {
-            applyLocalFilter()
-        }
+        didSet { applyLocalFilter() }
     }
     
     var isFilterActive: Bool {
         !selectedStatuses.isEmpty || !selectedPlatforms.isEmpty
     }
     
-    // Filtered hosts for display
-    private(set) var hosts: [Host] = []
+    private(set) var hosts: [HostEntity] = []
     
-    // Loading progress
     var isLoading = false
     var loadingMessage: String?
     var loadingProgress: Double = 0.0
     var loadedCount: Int = 0
     var totalCount: Int = 0
     
-    // Refreshing state (for pull-to-refresh with cached data)
     var isRefreshing = false
     var refreshProgress: Double = 0.0
     var refreshLoadedCount: Int = 0
     var refreshTotalCount: Int = 0
     
-    // Alert loading progress
     var isLoadingAlerts = false
     var alertLoadingProgress: Double = 0.0
     var alertLoadedCount: Int = 0
     var alertTotalCount: Int = 0
     
-    // Tab selection
     var selectedTab: Tab = .endpoints
     
     var errorMessage: String?
@@ -76,23 +66,13 @@ class HostsViewModel {
     
     private let apiClient = CrowdStrikeAPIClient.shared
     
-    // Cache URLs
-    private let fileManager = FileManager.default
-    private var cacheDirectory: URL {
-        fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first!
-            .appendingPathComponent("CrowdStrikeCache", isDirectory: true)
-    }
-    private var hostsCacheURL: URL { cacheDirectory.appendingPathComponent("hosts.json") }
-    private var alertsCacheURL: URL { cacheDirectory.appendingPathComponent("alerts.json") }
-    private var lastRefreshURL: URL { cacheDirectory.appendingPathComponent("lastRefresh.json") }
-    
     enum Tab: String, CaseIterable {
         case endpoints = "Endpoints"
         case alerts = "Alerts"
     }
     
-    init() {
-        // Load cached data immediately
+    init(modelContext: ModelContext) {
+        self.modelContext = modelContext
         loadCachedData()
         
         Task {
@@ -101,55 +81,41 @@ class HostsViewModel {
         }
     }
     
-    // MARK: - Caching
+    // MARK: - SwiftData Loading
     
     private func loadCachedData() {
-        // Create cache directory if needed
-        if !fileManager.fileExists(atPath: cacheDirectory.path) {
-            try? fileManager.createDirectory(at: cacheDirectory, withIntermediateDirectories: true)
-        }
-        
-        // Load cached hosts
-        if let data = try? Data(contentsOf: hostsCacheURL),
-           let cachedHosts = try? JSONDecoder().decode([Host].self, from: data) {
-            setAllHosts(cachedHosts)
+        do {
+            let hostFetch = FetchDescriptor<HostEntity>()
+            let cachedHosts = try modelContext.fetch(hostFetch)
+            allHosts = cachedHosts
+            hostSearchIndex.removeAll(keepingCapacity: true)
+            for host in cachedHosts {
+                hostSearchIndex[host.id] = host.searchableFields
+            }
             applyLocalFilter()
-            print("Loaded \(cachedHosts.count) cached hosts")
-        }
-        
-        // Load cached alerts
-        if let data = try? Data(contentsOf: alertsCacheURL),
-           let cachedAlerts = try? JSONDecoder().decode([Alert].self, from: data) {
-            allAlerts = sortedAlerts(cachedAlerts)
-            print("Loaded \(cachedAlerts.count) cached alerts")
-        }
-        
-        // Load last refresh timestamp
-        if let data = try? Data(contentsOf: lastRefreshURL),
-           let refreshDate = try? JSONDecoder().decode(Date.self, from: data) {
-            lastRefresh = refreshDate
+            
+            let alertFetch = FetchDescriptor<AlertEntity>(sortBy: [SortDescriptor(\.createdDate, order: .reverse)])
+            allAlerts = try modelContext.fetch(alertFetch)
+            
+            // Load last refresh timestamp from UserDefaults
+            if let refreshDate = UserDefaults.standard.object(forKey: "lastRefresh") as? Date {
+                lastRefresh = refreshDate
+            }
+            
+            print("Loaded \(cachedHosts.count) cached hosts and \(allAlerts.count) cached alerts from SwiftData")
+        } catch {
+            print("Failed to load cached data: \(error)")
         }
     }
     
     private func saveCachedData() {
-        // Ensure cache directory exists
-        if !fileManager.fileExists(atPath: cacheDirectory.path) {
-            try? fileManager.createDirectory(at: cacheDirectory, withIntermediateDirectories: true)
-        }
-        
-        // Save hosts
-        if let data = try? JSONEncoder().encode(allHosts) {
-            try? data.write(to: hostsCacheURL)
-        }
-        
-        // Save alerts
-        if let data = try? JSONEncoder().encode(allAlerts) {
-            try? data.write(to: alertsCacheURL)
-        }
-        
-        // Save last refresh timestamp
-        if let date = lastRefresh, let data = try? JSONEncoder().encode(date) {
-            try? data.write(to: lastRefreshURL)
+        do {
+            try modelContext.save()
+            if let lastRefresh {
+                UserDefaults.standard.set(lastRefresh, forKey: "lastRefresh")
+            }
+        } catch {
+            print("Failed to save context: \(error)")
         }
     }
     
@@ -163,19 +129,14 @@ class HostsViewModel {
         configuration = config
         await apiClient.updateConfiguration(config)
         await applyDebugSettings()
-        // Re-apply filter in case stale endpoint setting changed
         applyLocalFilter()
     }
     
-    /// Syncs debug settings to the `DebugLogger` actor and the API client.
-    /// Now `async` because `DebugLogger` is an actor (flags are isolated).
     private func applyDebugSettings() async {
         await DebugLogger.shared.configure(
             isEnabled: configuration.isDebugModeEnabled,
             verboseEnabled: configuration.enableVerboseLogging
         )
-        
-        // Sync debug settings to the API client
         await apiClient.setLoggingEnabled(configuration.isDebugModeEnabled)
     }
     
@@ -240,7 +201,6 @@ class HostsViewModel {
         loadingMessage = nil
     }
     
-    /// Fetches ALL hosts from the API with pagination (full load screen)
     func refreshHosts() async {
         isLoading = true
         loadingMessage = "Fetching endpoints..."
@@ -258,16 +218,25 @@ class HostsViewModel {
                     self?.loadingMessage = "Loading \(loaded) of \(total) endpoints..."
                 }
             }
-            setAllHosts(hosts)
+            
+            // Clear old data and insert new
+            try modelContext.delete(model: HostEntity.self)
+            let entities = hosts.map { HostEntity(from: $0) }
+            for entity in entities {
+                modelContext.insert(entity)
+            }
+            
+            allHosts = entities
+            hostSearchIndex.removeAll(keepingCapacity: true)
+            for entity in entities {
+                hostSearchIndex[entity.id] = entity.searchableFields
+            }
+            
             lastRefresh = Date()
             applyLocalFilter()
             saveCachedData()
             
-            // If the host fetch succeeded, clear any stale error so success is
-            // reflected in the UI; alert failures will set a fresh message below.
             errorMessage = nil
-            
-            // Also fetch alerts
             await refreshAlerts()
         } catch {
             errorMessage = error.localizedDescription
@@ -278,7 +247,6 @@ class HostsViewModel {
         loadingProgress = 0
     }
     
-    /// Pull-to-refresh for endpoints (shows progress in subtitle)
     func refreshEndpoints() async {
         isRefreshing = true
         refreshProgress = 0
@@ -294,7 +262,19 @@ class HostsViewModel {
                     self?.refreshProgress = total > 0 ? Double(loaded) / Double(total) : 0
                 }
             }
-            setAllHosts(hosts)
+            
+            try modelContext.delete(model: HostEntity.self)
+            let entities = hosts.map { HostEntity(from: $0) }
+            for entity in entities {
+                modelContext.insert(entity)
+            }
+            
+            allHosts = entities
+            hostSearchIndex.removeAll(keepingCapacity: true)
+            for entity in entities {
+                hostSearchIndex[entity.id] = entity.searchableFields
+            }
+            
             lastRefresh = Date()
             applyLocalFilter()
             saveCachedData()
@@ -306,12 +286,6 @@ class HostsViewModel {
         refreshProgress = 0
     }
     
-    /// Fetches alerts from the API with progress.
-    ///
-    /// Guards against overlapping fetches: if an alert fetch is already in
-    /// progress (e.g., the initial `refreshHosts()` chain is running and the
-    /// user pulls to refresh on the Alerts tab), this call returns early
-    /// instead of launching a concurrent fetch.
     func refreshAlerts() async {
         guard !isLoadingAlerts else { return }
         
@@ -331,15 +305,18 @@ class HostsViewModel {
                     self?.alertLoadingProgress = total > 0 ? Double(loaded) / Double(total) : 0
                 }
             }
-            allAlerts = sortedAlerts(alerts)
+            
+            try modelContext.delete(model: AlertEntity.self)
+            let entities = alerts.map { AlertEntity(from: $0) }
+            for entity in entities {
+                modelContext.insert(entity)
+            }
+            
+            allAlerts = entities.sorted { ($0.createdDate ?? .distantPast) > ($1.createdDate ?? .distantPast) }
             saveCachedData()
         } catch is CancellationError {
-            // `fetchAlerts` now propagates cancellation as `CancellationError`
-            // (previously it wrapped it in `APIErrorType.networkError(URLError(.cancelled))`,
-            // which made this catch arm unreachable).
-            print("Alert fetch cancelled - likely user navigated away")
+            print("Alert fetch cancelled")
         } catch {
-            // Surface alert fetch failures to the user (previously only logged).
             errorMessage = error.localizedDescription
             print("Failed to fetch alerts: \(error)")
         }
@@ -348,14 +325,11 @@ class HostsViewModel {
         alertLoadingProgress = 0
     }
     
-    /// Pull-to-refresh for alerts only
     func refreshAlertsOnly() async {
-        // Reuses `refreshAlerts()`, which guards against overlapping fetches.
         errorMessage = nil
         await refreshAlerts()
     }
     
-    /// Load hosts - uses cached data if available, otherwise fetches
     func loadHosts() async {
         if allHosts.isEmpty {
             await refreshHosts()
@@ -364,19 +338,11 @@ class HostsViewModel {
         }
     }
     
-    /// Called by user action - kept for compatibility
-    func searchHosts() async {
-        applyLocalFilter()
-    }
-    
-    /// Updates the search query and re-applies the local filter.
-    /// The view is responsible for debouncing calls to this method.
     func setSearchQuery(_ query: String) {
         searchQuery = query
         applyLocalFilter()
     }
     
-    /// Clear all filters
     func clearFilters() {
         selectedStatuses = []
         selectedPlatforms = []
@@ -384,32 +350,9 @@ class HostsViewModel {
         applyLocalFilter()
     }
     
-    /// Sort alerts by created date descending (most recent first).
-    /// Alerts without a parseable created date sink to the bottom.
-    private func sortedAlerts(_ alerts: [Alert]) -> [Alert] {
-        return alerts.sorted { lhs, rhs in
-            let lhsDate = lhs.createdDate ?? .distantPast
-            let rhsDate = rhs.createdDate ?? .distantPast
-            return lhsDate > rhsDate
-        }
-    }
-    
-    /// Sets `allHosts` and rebuilds the precomputed search index. All
-    /// assignments to `allHosts` should go through this so the index stays
-    /// in sync with the data.
-    private func setAllHosts(_ hosts: [Host]) {
-        allHosts = hosts
-        hostSearchIndex.removeAll(keepingCapacity: true)
-        for host in hosts {
-            hostSearchIndex[host.id] = host.searchableFields
-        }
-    }
-    
-    /// Apply local search filter to cached hosts
     private func applyLocalFilter() {
         var filtered = allHosts
         
-        // Filter out stale endpoints if enabled
         if configuration.hideStaleEndpoints {
             let cutoffDate = Date().addingTimeInterval(-Double(configuration.staleEndpointDays) * 24 * 60 * 60)
             filtered = filtered.filter { host in
@@ -418,27 +361,20 @@ class HostsViewModel {
             }
         }
         
-        // Apply status filter
         if !selectedStatuses.isEmpty {
             filtered = filtered.filter { host in
                 guard let status = host.status?.lowercased() else { return false }
-                return selectedStatuses.contains { filterStatus in
-                    status == filterStatus.rawValue
-                }
+                return selectedStatuses.contains { $0.rawValue == status }
             }
         }
         
-        // Apply platform filter
         if !selectedPlatforms.isEmpty {
             filtered = filtered.filter { host in
                 guard let platform = host.platformName?.lowercased() else { return false }
-                return selectedPlatforms.contains { filterPlatform in
-                    platform.contains(filterPlatform.searchTerm)
-                }
+                return selectedPlatforms.contains { platform.contains($0.searchTerm) }
             }
         }
         
-        // Apply search query filter using the precomputed index.
         let trimmedQuery = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         
         guard !trimmedQuery.isEmpty else {
@@ -448,22 +384,23 @@ class HostsViewModel {
         
         hosts = filtered.filter { host in
             guard let fields = hostSearchIndex[host.id] else {
-                // Fallback: build on the fly if missing from the index.
                 return host.searchableFields.contains { $0.contains(trimmedQuery) }
             }
             return fields.contains { $0.contains(trimmedQuery) }
         }
     }
     
-    /// Clear cache and logout
     func logout() async {
         do {
             try await KeychainManager.shared.clearAll()
-            // Drop the in-memory access token immediately so subsequent
-            // operations don't briefly reuse stale credentials.
             await apiClient.clearAuthState()
             hasCredentials = false
-            setAllHosts([])
+            
+            try modelContext.delete(model: HostEntity.self)
+            try modelContext.delete(model: AlertEntity.self)
+            try modelContext.save()
+            
+            allHosts = []
             hosts = []
             allAlerts = []
             searchQuery = ""
@@ -471,11 +408,9 @@ class HostsViewModel {
             selectedPlatforms = []
             errorMessage = nil
             lastRefresh = nil
+            hostSearchIndex.removeAll()
             
-            // Clear cached files
-            try? fileManager.removeItem(at: hostsCacheURL)
-            try? fileManager.removeItem(at: alertsCacheURL)
-            try? fileManager.removeItem(at: lastRefreshURL)
+            UserDefaults.standard.removeObject(forKey: "lastRefresh")
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -483,7 +418,18 @@ class HostsViewModel {
     
     func testConnection() async -> Bool {
         do {
-            return try await apiClient.testConnection()
+            // First just check if we can authenticate and get a token
+            _ = try await apiClient.testConnection()
+            
+            // Now check specific scopes and excessive permissions
+            let (canReadHosts, canReadAlerts, scopeError) = await apiClient.checkTokenScopes()
+            if let scopeError {
+                errorMessage = scopeError
+                // If it's just a warning about too many scopes, we might still return true
+                // but it's safer to return false to force the user to fix the misconfiguration.
+                return false
+            }
+            return canReadHosts && canReadAlerts
         } catch {
             errorMessage = error.localizedDescription
             return false
