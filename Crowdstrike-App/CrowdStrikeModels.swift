@@ -164,7 +164,7 @@ nonisolated struct Host: Identifiable, Codable, Hashable, Sendable {
         let parts = [hostname, localIp, externalIp, macAddress, firstSeen]
             .compactMap { $0?.isEmpty == false ? $0 : nil }
         if parts.isEmpty {
-            return "unknown-\(UUID().uuidString)"
+            return "unknown:\(Date().timeIntervalSince1970)"
         }
         return "unknown:" + parts.joined(separator: "|")
     }
@@ -582,7 +582,7 @@ nonisolated struct Alert: Identifiable, Codable, Hashable, Sendable {
         if let deviceId, !deviceId.isEmpty { parts.append(deviceId) }
         if let severity { parts.append(String(severity)) }
         if parts.isEmpty {
-            return "unknown-\(UUID().uuidString)"
+            return "unknown:\(Date().timeIntervalSince1970)"
         }
         return "unknown:" + parts.joined(separator: "|")
     }
@@ -882,7 +882,7 @@ nonisolated struct APIErrorDetail: Codable, Sendable {
 
 // MARK: - API Error Type
 
-nonisolated enum APIErrorType: Error, LocalizedError, Sendable {
+nonisolated enum APIError: Error, LocalizedError, Sendable {
     case notAuthenticated
     case authenticationFailed(statusCode: Int, message: String)
     case invalidResponse

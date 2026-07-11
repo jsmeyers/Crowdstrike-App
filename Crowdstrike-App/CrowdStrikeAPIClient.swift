@@ -109,7 +109,7 @@ actor CrowdStrikeAPIClient {
     
     private func authorizationHeader() throws -> String {
         guard let token = accessToken, !token.isEmpty else {
-            throw APIErrorType.notAuthenticated
+            throw APIError.notAuthenticated
         }
         return "Bearer \(token)"
     }
@@ -131,16 +131,53 @@ actor CrowdStrikeAPIClient {
         print(String(repeating: "=", count: 80))
         
         if let jsonString = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-           let prettyData = try? JSONSerialization.data(withJSONObject: jsonString, options: .prettyPrinted),
+           let redactedJson = Self.redactSensitive(jsonString) as? [String: Any],
+           let prettyData = try? JSONSerialization.data(withJSONObject: redactedJson, options: .prettyPrinted),
            let prettyString = String(data: prettyData, encoding: .utf8) {
             print(prettyString)
         } else if let rawString = String(data: data, encoding: .utf8) {
-            print(rawString)
+            print(Self.redactSensitiveString(rawString))
         } else {
             print("[Unable to decode response data]")
         }
         
         print(String(repeating: "=", count: 80) + "\n")
+    }
+    
+    private nonisolated static func redactSensitive(_ json: Any) -> Any {
+        guard let dict = json as? [String: Any] else { return json }
+        var result = dict
+        for key in dict.keys {
+            let lowercased = key.lowercased()
+            if lowercased.contains("access_token") || lowercased.contains("token") || lowercased.contains("secret") {
+                if let value = dict[key] as? String, !value.isEmpty {
+                    result[key] = String(value.prefix(8)) + "***REDACTED***"
+                }
+            } else if let value = dict[key] {
+                result[key] = redactSensitive(value)
+            }
+        }
+        return result
+    }
+    
+    private nonisolated static func redactSensitiveString(_ string: String) -> String {
+        var result = string
+        result = result.replacingOccurrences(
+            of: "client_secret=[^\u0026]+",
+            with: "client_secret=***REDACTED***",
+            options: .regularExpression
+        )
+        result = result.replacingOccurrences(
+            of: "\"access_token\"\\s*:\\s*\"[^\"]+\"",
+            with: "\"access_token\":\"***REDACTED***\"",
+            options: .regularExpression
+        )
+        result = result.replacingOccurrences(
+            of: "Bearer\\s+[A-Za-z0-9\\-\\._~+\\/]+=*",
+            with: "Bearer ***REDACTED***",
+            options: .regularExpression
+        )
+        return result
     }
     
     private func logResponseErrors(_ errors: [APIErrorDetail]?, context: String) {
@@ -168,21 +205,26 @@ actor CrowdStrikeAPIClient {
         let session = urlSession()
         let (data, response) = try await session.data(for: request)
         
-        logResponse(data, label: "OAuth Token Response")
+        // Intentionally do not log the OAuth token response body, even in debug mode,
+        // to avoid leaking access tokens to the device console. Error responses are
+        // surfaced through the thrown error below.
+        if shouldLogResponses {
+            print("OAuth token response received (body redacted for security)")
+        }
         
         guard let httpResponse = response as? HTTPURLResponse else {
-            throw APIErrorType.invalidResponse
+            throw APIError.invalidResponse
         }
         
         guard httpResponse.statusCode == 201 || httpResponse.statusCode == 200 else {
             let errorMessage = String(data: data, encoding: .utf8) ?? "Unknown error"
-            throw APIErrorType.authenticationFailed(statusCode: httpResponse.statusCode, message: errorMessage)
+            throw APIError.authenticationFailed(statusCode: httpResponse.statusCode, message: errorMessage)
         }
         
         let tokenResponse = try JSONDecoder().decode(OAuthTokenResponse.self, from: data)
         
         guard let token = tokenResponse.accessToken, !token.isEmpty else {
-            throw APIErrorType.authenticationFailed(statusCode: httpResponse.statusCode, message: "No access token in response")
+            throw APIError.authenticationFailed(statusCode: httpResponse.statusCode, message: "No access token in response")
         }
         
         let expiresIn = tokenResponse.expiresIn ?? 1800
@@ -218,14 +260,14 @@ actor CrowdStrikeAPIClient {
                 try await authenticate(clientId: clientId, clientSecret: clientSecret)
                 self.shouldLogResponses = configuration.isDebugModeEnabled
             } else {
-                throw APIErrorType.notAuthenticated
+                throw APIError.notAuthenticated
             }
         case .bearerToken:
             if let token = try? await keychain.retrieveBearerToken() {
                 self.accessToken = token
                 self.tokenExpiration = Date().addingTimeInterval(3600)
             } else {
-                throw APIErrorType.notAuthenticated
+                throw APIError.notAuthenticated
             }
         }
     }
@@ -239,7 +281,7 @@ actor CrowdStrikeAPIClient {
         }
         
         let task = Task<Void, Error> { [weak self] in
-            guard let self else { throw APIErrorType.notAuthenticated }
+            guard let self else { throw APIError.notAuthenticated }
             try await self.refreshToken()
         }
         tokenRefreshTask = task
@@ -318,7 +360,7 @@ actor CrowdStrikeAPIClient {
             urlString += "&offset=\(offset)"
         }
         
-        guard let url = URL(string: urlString) else { throw APIErrorType.invalidResponse }
+        guard let url = URL(string: urlString) else { throw APIError.invalidResponse }
         
         var request = URLRequest(url: url)
         request.setValue(try authorizationHeader(), forHTTPHeaderField: "Authorization")
@@ -330,7 +372,7 @@ actor CrowdStrikeAPIClient {
         logResponse(data, label: "Host Search Response")
         
         guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
-            throw APIErrorType.requestFailed(
+            throw APIError.requestFailed(
                 statusCode: (response as? HTTPURLResponse)?.statusCode ?? 0,
                 message: String(data: data, encoding: .utf8) ?? "Unknown error"
             )
@@ -357,7 +399,7 @@ actor CrowdStrikeAPIClient {
         var urlComponents = URLComponents(string: "\(configuration.baseURLWithProtocol)/devices/entities/devices/v2")!
         urlComponents.queryItems = hostIds.map { URLQueryItem(name: "ids", value: $0) }
         
-        guard let url = urlComponents.url else { throw APIErrorType.invalidResponse }
+        guard let url = urlComponents.url else { throw APIError.invalidResponse }
         
         var request = URLRequest(url: url)
         request.setValue(try authorizationHeader(), forHTTPHeaderField: "Authorization")
@@ -369,7 +411,7 @@ actor CrowdStrikeAPIClient {
         logResponse(data, label: "Host Details Response (\(hostIds.count) hosts)")
         
         guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
-            throw APIErrorType.requestFailed(
+            throw APIError.requestFailed(
                 statusCode: (response as? HTTPURLResponse)?.statusCode ?? 0,
                 message: String(data: data, encoding: .utf8) ?? "Unknown error"
             )
@@ -380,7 +422,7 @@ actor CrowdStrikeAPIClient {
         do {
             return try JSONDecoder().decode(HostDetailsResponse.self, from: data).resources ?? []
         } catch {
-            throw APIErrorType.decodingError(error)
+            throw APIError.decodingError(error)
         }
     }
     
@@ -392,7 +434,7 @@ actor CrowdStrikeAPIClient {
             countUrlString += "&filter=\(encodeFQLFilter(query))"
         }
         
-        guard let countUrl = URL(string: countUrlString) else { throw APIErrorType.invalidResponse }
+        guard let countUrl = URL(string: countUrlString) else { throw APIError.invalidResponse }
         var countRequest = URLRequest(url: countUrl)
         countRequest.setValue(try authorizationHeader(), forHTTPHeaderField: "Authorization")
         
@@ -402,7 +444,7 @@ actor CrowdStrikeAPIClient {
         guard let httpResponse = countResponse as? HTTPURLResponse, httpResponse.statusCode == 200 else {
             let statusCode = (countResponse as? HTTPURLResponse)?.statusCode ?? 0
             let message = String(data: countData, encoding: .utf8) ?? "Unknown error"
-            throw APIErrorType.requestFailed(statusCode: statusCode, message: message)
+            throw APIError.requestFailed(statusCode: statusCode, message: message)
         }
         
         let initialResponse = try JSONDecoder().decode(HostsResponse.self, from: countData)
@@ -461,7 +503,7 @@ actor CrowdStrikeAPIClient {
             urlString += "&offset=\(offset)"
         }
         
-        guard let url = URL(string: urlString) else { throw APIErrorType.invalidResponse }
+        guard let url = URL(string: urlString) else { throw APIError.invalidResponse }
         
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
@@ -474,7 +516,7 @@ actor CrowdStrikeAPIClient {
         logResponse(data, label: "Alerts Query Response (offset=\(offset ?? 0))")
         
         guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
-            throw APIErrorType.requestFailed(
+            throw APIError.requestFailed(
                 statusCode: (response as? HTTPURLResponse)?.statusCode ?? 0,
                 message: String(data: data, encoding: .utf8) ?? "Unknown error"
             )
@@ -638,7 +680,7 @@ actor CrowdStrikeAPIClient {
         var urlComponents = URLComponents(string: "\(configuration.baseURLWithProtocol)/devices/queries/devices/v1")!
         urlComponents.queryItems = [URLQueryItem(name: "limit", value: "1")]
         
-        guard let url = urlComponents.url else { throw APIErrorType.invalidResponse }
+        guard let url = urlComponents.url else { throw APIError.invalidResponse }
         
         var request = URLRequest(url: url)
         request.setValue(try authorizationHeader(), forHTTPHeaderField: "Authorization")
@@ -648,7 +690,7 @@ actor CrowdStrikeAPIClient {
         let (_, response) = try await session.data(for: request)
         
         guard let httpResponse = response as? HTTPURLResponse else {
-            throw APIErrorType.invalidResponse
+            throw APIError.invalidResponse
         }
         
         return httpResponse.statusCode == 200

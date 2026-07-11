@@ -13,6 +13,8 @@ import SwiftData
 class HostsViewModel {
     
     private let modelContext: ModelContext
+    private let endpointRepository: EndpointRepository
+    private let alertRepository: AlertRepository
     
     // All hosts fetched from API (cache)
     private(set) var allHosts: [HostEntity] = []
@@ -73,6 +75,8 @@ class HostsViewModel {
     
     init(modelContext: ModelContext) {
         self.modelContext = modelContext
+        self.endpointRepository = EndpointRepository(modelContext: modelContext)
+        self.alertRepository = AlertRepository(modelContext: modelContext)
         loadCachedData()
         
         Task {
@@ -85,8 +89,7 @@ class HostsViewModel {
     
     private func loadCachedData() {
         do {
-            let hostFetch = FetchDescriptor<HostEntity>()
-            let cachedHosts = try modelContext.fetch(hostFetch)
+            let cachedHosts = try endpointRepository.fetchAll()
             allHosts = cachedHosts
             hostSearchIndex.removeAll(keepingCapacity: true)
             for host in cachedHosts {
@@ -94,8 +97,7 @@ class HostsViewModel {
             }
             applyLocalFilter()
             
-            let alertFetch = FetchDescriptor<AlertEntity>(sortBy: [SortDescriptor(\.createdDate, order: .reverse)])
-            allAlerts = try modelContext.fetch(alertFetch)
+            allAlerts = try alertRepository.fetchAllSortedByCreatedDate()
             
             // Load last refresh timestamp from UserDefaults
             if let refreshDate = UserDefaults.standard.object(forKey: "lastRefresh") as? Date {
@@ -108,14 +110,9 @@ class HostsViewModel {
         }
     }
     
-    private func saveCachedData() {
-        do {
-            try modelContext.save()
-            if let lastRefresh {
-                UserDefaults.standard.set(lastRefresh, forKey: "lastRefresh")
-            }
-        } catch {
-            print("Failed to save context: \(error)")
+    private func saveLastRefresh() {
+        if let lastRefresh {
+            UserDefaults.standard.set(lastRefresh, forKey: "lastRefresh")
         }
     }
     
@@ -219,12 +216,8 @@ class HostsViewModel {
                 }
             }
             
-            // Clear old data and insert new
-            try modelContext.delete(model: HostEntity.self)
-            let entities = hosts.map { HostEntity(from: $0) }
-            for entity in entities {
-                modelContext.insert(entity)
-            }
+            try endpointRepository.replaceAll(with: hosts)
+            let entities = try endpointRepository.fetchAll()
             
             allHosts = entities
             hostSearchIndex.removeAll(keepingCapacity: true)
@@ -234,7 +227,7 @@ class HostsViewModel {
             
             lastRefresh = Date()
             applyLocalFilter()
-            saveCachedData()
+            saveLastRefresh()
             
             errorMessage = nil
             await refreshAlerts()
@@ -263,11 +256,8 @@ class HostsViewModel {
                 }
             }
             
-            try modelContext.delete(model: HostEntity.self)
-            let entities = hosts.map { HostEntity(from: $0) }
-            for entity in entities {
-                modelContext.insert(entity)
-            }
+            try endpointRepository.replaceAll(with: hosts)
+            let entities = try endpointRepository.fetchAll()
             
             allHosts = entities
             hostSearchIndex.removeAll(keepingCapacity: true)
@@ -277,7 +267,7 @@ class HostsViewModel {
             
             lastRefresh = Date()
             applyLocalFilter()
-            saveCachedData()
+            saveLastRefresh()
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -310,14 +300,9 @@ class HostsViewModel {
                 }
             }
             
-            try modelContext.delete(model: AlertEntity.self)
-            let entities = alerts.map { AlertEntity(from: $0) }
-            for entity in entities {
-                modelContext.insert(entity)
-            }
-            
-            allAlerts = entities.sorted { ($0.createdDate ?? .distantPast) > ($1.createdDate ?? .distantPast) }
-            saveCachedData()
+            try alertRepository.replaceAll(with: alerts)
+            allAlerts = try alertRepository.fetchAllSortedByCreatedDate()
+            saveLastRefresh()
         } catch is CancellationError {
             print("Alert fetch cancelled")
         } catch {
@@ -400,9 +385,8 @@ class HostsViewModel {
             await apiClient.clearAuthState()
             hasCredentials = false
             
-            try modelContext.delete(model: HostEntity.self)
-            try modelContext.delete(model: AlertEntity.self)
-            try modelContext.save()
+            try endpointRepository.deleteAll()
+            try alertRepository.deleteAll()
             
             allHosts = []
             hosts = []
@@ -510,4 +494,3 @@ enum EndpointPlatform: String, CaseIterable, Identifiable {
         }
     }
 }
-

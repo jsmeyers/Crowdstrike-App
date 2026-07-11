@@ -5,8 +5,17 @@ DerivedData/
 xcuserdata/
 *.xcworkspace/contents.xcworkspace/userdata/
 
+# Swift Package Manager
+.build/
+Package.resolved
+
 # SwiftData
 *.store
 
 # macOS
 .DS_Store
+
+# Xcode automatic backups
+*.xccheckout
+*.moved-aside
+*.xcuserdatad
