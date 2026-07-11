@@ -2,179 +2,186 @@ import SwiftUI
 
 struct SettingsView: View {
     @Bindable var viewModel: HostsViewModel
+    
     @State private var clientId = ""
     @State private var clientSecret = ""
     @State private var bearerToken = ""
-    @State private var selectedRegion: CrowdStrikeRegion = .us1
-    @State private var showingSaveConfirmation = false
-    @State private var showingLogoutConfirmation = false
+    @State private var customRegion = false
+    @State private var isTestingConnection = false
+    @State private var testConnectionResult: Bool? = nil
     
     var body: some View {
         Form {
-            Section("Authentication") {
-                Picker("Auth Method", selection: $viewModel.configuration.authMethod) {
-                    ForEach(AuthMethod.allCases) { method in
-                        Text(method.rawValue).tag(method)
+            // MARK: - Account / Authentication
+            if viewModel.hasCredentials {
+                Section {
+                    Button {
+                        Task {
+                            isTestingConnection = true
+                            testConnectionResult = nil
+                            let success = await viewModel.testConnection()
+                            testConnectionResult = success
+                            isTestingConnection = false
+                        }
+                    } label: {
+                        HStack {
+                            if isTestingConnection {
+                                ProgressView()
+                            } else {
+                                Image(systemName: "wifi")
+                            }
+                            Text("Test Connection")
+                            Spacer()
+                            if let result = testConnectionResult {
+                                Image(systemName: result ? "checkmark.circle.fill" : "xmark.circle.fill")
+                                    .foregroundStyle(result ? .green : .red)
+                            }
+                        }
+                    }
+                    
+                    Button(role: .destructive) {
+                        Task {
+                            await viewModel.logout()
+                        }
+                    } label: {
+                        HStack {
+                            Image(systemName: "rectangle.portrait.and.arrow.right")
+                            Text("Log Out")
+                        }
+                    }
+                } header: {
+                    Text("Account")
+                } footer: {
+                    if viewModel.configuration.authMethod == .oauth {
+                        Text("Authenticated via OAuth2")
+                    } else {
+                        Text("Authenticated via Bearer Token")
                     }
                 }
-                .pickerStyle(.segmented)
-                
-                if viewModel.configuration.authMethod == .oauth {
-                    TextField("Client ID", text: $clientId)
-                        .textContentType(.username)
-                        .autocorrectionDisabled()
+            } else {
+                Section {
+                    Picker("Authentication Method", selection: $viewModel.configuration.authMethod) {
+                        ForEach(AuthMethod.allCases) { method in
+                            Text(method.rawValue).tag(method)
+                        }
+                    }
                     
-                    SecureField("Client Secret", text: $clientSecret)
-                        .textContentType(.password)
-                    
-                    Picker("Region", selection: $selectedRegion) {
+                    Picker("Region", selection: $viewModel.configuration.region) {
                         ForEach(CrowdStrikeRegion.allCases) { region in
                             Text(region.displayName).tag(region)
                         }
                     }
                     
-                    Button("Authenticate") {
-                        Task {
-                            await viewModel.authenticate(
-                                clientId: clientId,
-                                clientSecret: clientSecret,
-                                region: selectedRegion
-                            )
-                        }
-                    }
-                    .disabled(clientId.isEmpty || clientSecret.isEmpty)
-                } else {
-                    SecureField("Bearer Token", text: $bearerToken)
-                        .textContentType(.password)
+                    Toggle("Custom Base URL", isOn: $customRegion)
                     
-                    Button("Set Token") {
-                        Task {
-                            await viewModel.authenticateWithBearerToken(bearerToken)
-                        }
+                    if customRegion {
+                        TextField("https://api.example.com", text: $viewModel.configuration.customBaseURL)
+                            .keyboardType(.URL)
+                            .autocapitalization(.none)
                     }
-                    .disabled(bearerToken.isEmpty)
-                }
-            }
-            
-            Section {
-                if viewModel.hasCredentials {
-                    HStack {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundStyle(.green)
-                        Text("Authenticated")
-                    }
-                } else {
-                    HStack {
-                        Image(systemName: "xmark.circle.fill")
-                            .foregroundStyle(.red)
-                        Text("Not Authenticated")
-                    }
-                }
-                
-                if let error = viewModel.errorMessage {
-                    Text(error)
-                        .foregroundStyle(.red)
-                        .font(.caption)
-                }
-            }
-            
-            Section("Endpoints") {
-                Toggle("Hide Stale Endpoints", isOn: $viewModel.configuration.hideStaleEndpoints)
-                    .onChange(of: viewModel.configuration.hideStaleEndpoints) { _, newValue in
-                        Task {
-                            await viewModel.saveConfiguration(viewModel.configuration)
-                        }
-                    }
-                
-                if viewModel.configuration.hideStaleEndpoints {
-                    Stepper("Days: \(viewModel.configuration.staleEndpointDays)", value: $viewModel.configuration.staleEndpointDays, in: 7...90)
-                        .onChange(of: viewModel.configuration.staleEndpointDays) { _, newValue in
+                    
+                    if viewModel.configuration.authMethod == .oauth {
+                        TextField("Client ID", text: $clientId)
+                            .autocapitalization(.none)
+                        
+                        SecureField("Client Secret", text: $clientSecret)
+                            .autocapitalization(.none)
+                        
+                        Button("Authenticate") {
                             Task {
-                                await viewModel.saveConfiguration(viewModel.configuration)
+                                await viewModel.authenticate(
+                                    clientId: clientId,
+                                    clientSecret: clientSecret,
+                                    region: viewModel.configuration.region
+                                )
                             }
                         }
+                    } else {
+                        SecureField("Bearer Token", text: $bearerToken)
+                            .autocapitalization(.none)
+                        
+                        Button("Authenticate") {
+                            Task {
+                                await viewModel.authenticateWithBearerToken(bearerToken)
+                            }
+                        }
+                    }
+                } header: {
+                    Text("Authentication")
                 }
-                
-                Text("When enabled, endpoints that haven't connected in the specified number of days will be hidden from the list.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
             
-            Section("Alerts") {
-                Toggle("Filter Third-Party Alerts", isOn: $viewModel.configuration.filterThirdPartyAlerts)
-                    .onChange(of: viewModel.configuration.filterThirdPartyAlerts) { _, newValue in
-                        Task {
-                            await viewModel.saveConfiguration(viewModel.configuration)
-                        }
-                    }
-                
-                Text("When enabled, alerts from third-party integrations are hidden. Toggle this off to see all alerts including third-party ones.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                
-                Button("Refresh Alerts") {
-                    Task {
-                        await viewModel.refreshAlerts()
-                    }
-                }
-                .disabled(!viewModel.hasCredentials || viewModel.isLoadingAlerts)
-            }
-            
-            Section("Debug") {
-                Toggle("Enable API Response Logging", isOn: $viewModel.configuration.isDebugModeEnabled)
-                    .onChange(of: viewModel.configuration.isDebugModeEnabled) { _, newValue in
-                        Task {
-                            await viewModel.saveConfiguration(viewModel.configuration)
-                        }
-                    }
-                
-                Toggle("Verbose Logging", isOn: $viewModel.configuration.enableVerboseLogging)
-                    .onChange(of: viewModel.configuration.enableVerboseLogging) { _, newValue in
-                        Task {
-                            await viewModel.saveConfiguration(viewModel.configuration)
-                        }
-                    }
-                
-                Text("When enabled, API responses and network activity will be logged to the console. Useful for troubleshooting API issues.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            
+            // MARK: - Alerts
             Section {
-                Button("Test Connection", role: .none) {
-                    Task {
-                        _ = await viewModel.testConnection()
-                    }
+                Picker("Minimum Severity", selection: $viewModel.configuration.alertMinSeverity) {
+                    Text("Informational (0)").tag(0)
+                    Text("Low (20)").tag(20)
+                    Text("Medium (40)").tag(40)
+                    Text("High (55)").tag(55)
+                    Text("Critical (80)").tag(80)
                 }
-                .disabled(!viewModel.hasCredentials)
                 
-                Button("Logout", role: .destructive) {
-                    showingLogoutConfirmation = true
-                }
-                .disabled(!viewModel.hasCredentials)
+                Stepper("Lookback (Days): \(viewModel.configuration.alertLookbackDays)", value: $viewModel.configuration.alertLookbackDays, in: 1...30)
+                
+                Toggle("Filter Third-Party Alerts", isOn: $viewModel.configuration.filterThirdPartyAlerts)
+            } header: {
+                Text("Alerts")
+            } footer: {
+                Text("Adjusting these filters will apply on the next alert refresh.")
             }
             
-            Section("About") {
+            // MARK: - Endpoints
+            Section {
+                Toggle("Hide Stale Endpoints", isOn: $viewModel.configuration.hideStaleEndpoints)
+                
+                if viewModel.configuration.hideStaleEndpoints {
+                    Stepper("Stale Threshold (Days): \(viewModel.configuration.staleEndpointDays)", value: $viewModel.configuration.staleEndpointDays, in: 1...90)
+                }
+            } header: {
+                Text("Endpoints")
+            }
+            
+            // MARK: - Network
+            Section {
+                Toggle("Enable Proxy", isOn: $viewModel.configuration.proxy.isEnabled)
+                
+                if viewModel.configuration.proxy.isEnabled {
+                    TextField("Host", text: $viewModel.configuration.proxy.host)
+                        .autocapitalization(.none)
+                    
+                    TextField("Port", value: $viewModel.configuration.proxy.port, format: .number)
+                        .keyboardType(.numberPad)
+                    
+                    Toggle("Requires Auth", isOn: $viewModel.configuration.proxy.requiresAuth)
+                }
+            } header: {
+                Text("Network")
+            }
+            
+            // MARK: - Debug
+            Section {
+                Toggle("Enable Debug Logging", isOn: $viewModel.configuration.isDebugModeEnabled)
+                
+                if viewModel.configuration.isDebugModeEnabled {
+                    Toggle("Verbose Logging", isOn: $viewModel.configuration.enableVerboseLogging)
+                }
+            } header: {
+                Text("Debug")
+            }
+            
+            // MARK: - About
+            Section {
                 LabeledContent("Version", value: "1.0.0")
                 LabeledContent("Region", value: viewModel.configuration.region.displayName)
-                if let lastRefresh = viewModel.lastRefresh {
-                    LabeledContent("Last Refresh", value: lastRefresh, format: .dateTime)
-                }
-                LabeledContent("Total Endpoints", value: "\(viewModel.allHosts.count)")
-                LabeledContent("Visible Endpoints", value: "\(viewModel.hosts.count)")
-                LabeledContent("Total Alerts", value: "\(viewModel.allAlerts.count)")
+            } header: {
+                Text("About")
             }
         }
         .navigationTitle("Settings")
-        .alert("Logged Out", isPresented: $showingLogoutConfirmation) {
-            Button("Cancel", role: .cancel) { }
-            Button("Logout", role: .destructive) {
-                Task {
-                    await viewModel.logout()
-                }
+        .onChange(of: viewModel.configuration) { _, _ in
+            Task {
+                await viewModel.saveConfiguration(viewModel.configuration)
             }
-        } message: {
-            Text("Are you sure you want to log out? This will clear all cached data.")
         }
     }
 }

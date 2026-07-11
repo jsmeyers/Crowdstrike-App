@@ -9,7 +9,7 @@ import Foundation
 
 // MARK: - Authentication Method
 
-enum AuthMethod: String, CaseIterable, Identifiable, Codable, Sendable {
+nonisolated enum AuthMethod: String, CaseIterable, Identifiable, Codable, Sendable {
     case oauth = "OAuth2"
     case bearerToken = "Bearer Token"
     
@@ -32,9 +32,6 @@ nonisolated struct ProxyConfiguration: Codable, Equatable, Sendable {
     var host: String = ""
     var port: Int = 8080
     var requiresAuth: Bool = false
-    // NOTE: `username` and `password` have been moved to the keychain
-    // (see KeychainManager.storeProxyCredentials). They must NOT live in
-    // UserDefaults, where Codable AppConfiguration is persisted.
     
     static let `default` = ProxyConfiguration()
     
@@ -51,8 +48,6 @@ nonisolated struct AppConfiguration: Codable, Equatable, Sendable {
     var authMethod: AuthMethod = .oauth
     var region: CrowdStrikeRegion = .us1
     var customBaseURL: String = ""
-    // NOTE: `bearerToken` has been removed. Bearer tokens are stored
-    // exclusively in the keychain via KeychainManager.storeBearerToken.
     
     // Network
     var requestTimeout: Double = 30.0
@@ -63,6 +58,8 @@ nonisolated struct AppConfiguration: Codable, Equatable, Sendable {
     
     // Alerts
     var filterThirdPartyAlerts: Bool = true
+    var alertMinSeverity: Int = 55
+    var alertLookbackDays: Int = 7
     
     // Endpoints
     var hideStaleEndpoints: Bool = false
@@ -119,13 +116,7 @@ nonisolated struct AppConfiguration: Codable, Equatable, Sendable {
 
 // MARK: - Debug Logger
 
-/// Centralized debug logger. Modeled as an `actor` so the `isEnabled` /
-/// `verboseEnabled` flags (mutated from the MainActor when settings change)
-/// and the log calls (potentially from the API client actor) are serialized.
-/// This avoids data races that a plain `class` with mutable `var` flags would
-/// have when accessed from multiple concurrency domains.
 actor DebugLogger {
-    
     static let shared = DebugLogger()
     
     private var isEnabled: Bool = false
@@ -133,14 +124,10 @@ actor DebugLogger {
     
     private init() {}
     
-    // MARK: - Configuration
-    
     func configure(isEnabled: Bool, verboseEnabled: Bool) {
         self.isEnabled = isEnabled
         self.verboseEnabled = verboseEnabled
     }
-    
-    // MARK: - Logging
     
     func log(_ message: String, category: String = "General", isVerbose: Bool = false) {
         guard isEnabled else { return }
@@ -155,7 +142,6 @@ actor DebugLogger {
         guard isEnabled else { return }
         log("Request: \(request.httpMethod ?? "?") \(request.url?.absoluteString ?? "?")", category: "Network")
         if verboseEnabled, let headers = request.allHTTPHeaderFields {
-            // Redact the Authorization header before logging
             var safeHeaders = headers
             if safeHeaders["Authorization"] != nil {
                 safeHeaders["Authorization"] = "***REDACTED***"
@@ -182,7 +168,6 @@ actor DebugLogger {
         log("Error: \(context) - \(error.localizedDescription)", category: "Error")
     }
     
-    /// Pure helper — no isolation concerns.
     private nonisolated func redactSensitive(_ string: String) -> String {
         var result = string
         result = result.replacingOccurrences(
@@ -195,7 +180,6 @@ actor DebugLogger {
             with: "\"access_token\":\"***REDACTED***\"",
             options: .regularExpression
         )
-        // Also redact bearer tokens in Authorization headers within request bodies
         result = result.replacingOccurrences(
             of: "Bearer\\s+[A-Za-z0-9\\-\\._~+\\/]+=*",
             with: "Bearer ***REDACTED***",

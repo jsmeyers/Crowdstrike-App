@@ -295,8 +295,12 @@ class HostsViewModel {
         alertTotalCount = 0
         
         do {
+            let lookbackDate = Date().addingTimeInterval(-Double(configuration.alertLookbackDays) * 24 * 60 * 60)
+            
             let alerts = try await apiClient.fetchAlerts(
                 limit: 500,
+                minSeverity: configuration.alertMinSeverity,
+                since: lookbackDate,
                 filterThirdParty: configuration.filterThirdPartyAlerts
             ) { [weak self] loaded, total in
                 Task { @MainActor in

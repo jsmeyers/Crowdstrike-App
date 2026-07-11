@@ -1,0 +1,12 @@
+# Xcode
+build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+*.xcworkspace/contents.xcworkspace/userdata/
+
+# SwiftData
+*.store
+
+# macOS
+.DS_Store
