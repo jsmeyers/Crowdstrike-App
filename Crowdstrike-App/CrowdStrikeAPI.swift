@@ -398,7 +398,6 @@ nonisolated struct HostGroup: Codable, Hashable, Sendable {
         name = try container.decodeIfPresent(String.self, forKey: .name)
     }
 }
-
 // MARK: - Alert Device (nested in Alert response)
 
 nonisolated struct AlertDevice: Codable, Sendable {
@@ -1293,7 +1292,16 @@ actor CrowdStrikeAPIClient {
         
         let hostsResponse = try JSONDecoder().decode(HostsResponse.self, from: data)
         logResponseErrors(hostsResponse.errors, context: "Host Search")
-        return (hostsResponse.resources ?? [], hostsResponse.meta?.pagination?.offset, hostsResponse.meta?.pagination?.total)
+        
+        let ids = hostsResponse.resources ?? []
+        let total = hostsResponse.meta?.pagination?.total ?? 0
+        let apiOffset = hostsResponse.meta?.pagination?.offset ?? (offset ?? 0)
+        
+        // Manually advance the offset if the API returned the current offset instead of the next one
+        let nextOffset: Int? = ids.isEmpty ? nil : (apiOffset > (offset ?? 0) ? apiOffset : (offset ?? 0) + ids.count)
+        let shouldBreak = nextOffset == nil || ids.isEmpty || (total > 0 && (nextOffset ?? 0) >= total)
+        
+        return (ids, shouldBreak ? nil : nextOffset, total)
     }
     
     private func getHostDetailsBatch(hostIds: [String]) async throws -> [Host] {
@@ -1428,7 +1436,16 @@ actor CrowdStrikeAPIClient {
         
         let alertsResponse = try JSONDecoder().decode(AlertsResponse.self, from: data)
         logResponseErrors(alertsResponse.errors, context: "Alerts Query")
-        return (alertsResponse.resources ?? [], alertsResponse.meta?.pagination?.offset, alertsResponse.meta?.pagination?.total)
+        
+        let ids = alertsResponse.resources ?? []
+        let total = alertsResponse.meta?.pagination?.total ?? 0
+        let apiOffset = alertsResponse.meta?.pagination?.offset ?? (offset ?? 0)
+        
+        // Manually advance the offset if the API returned the current offset instead of the next one
+        let nextOffset: Int? = ids.isEmpty ? nil : (apiOffset > (offset ?? 0) ? apiOffset : (offset ?? 0) + ids.count)
+        let shouldBreak = nextOffset == nil || ids.isEmpty || (total > 0 && (nextOffset ?? 0) >= total)
+        
+        return (ids, shouldBreak ? nil : nextOffset, total)
     }
     
     func fetchAlerts(limit: Int = 500, minSeverity: Int? = 55, since: Date? = nil, filterThirdParty: Bool = true, progressHandler: @escaping (Int, Int) -> Void = { _, _ in }) async throws -> [Alert] {
@@ -1621,3 +1638,4 @@ nonisolated extension Date {
         return "\(days) days ago"
     }
 }
+
