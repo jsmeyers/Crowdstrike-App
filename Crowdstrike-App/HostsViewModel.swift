@@ -23,6 +23,10 @@ class HostsViewModel {
         didSet { applyLocalFilter() }
     }
     
+    var sortAscending: Bool = false {
+        didSet { applyLocalFilter() }
+    }
+    
     var isFilterActive: Bool {
         !selectedStatuses.isEmpty || !selectedPlatforms.isEmpty
     }
@@ -341,17 +345,31 @@ class HostsViewModel {
         
         let trimmedQuery = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         
-        guard !trimmedQuery.isEmpty else {
-            hosts = filtered
-            return
+        if !trimmedQuery.isEmpty {
+            filtered = filtered.filter { host in
+                guard let fields = hostSearchIndex[host.id] else {
+                    return host.searchableFields.contains { $0.contains(trimmedQuery) }
+                }
+                return fields.contains { $0.contains(trimmedQuery) }
+            }
         }
         
-        hosts = filtered.filter { host in
-            guard let fields = hostSearchIndex[host.id] else {
-                return host.searchableFields.contains { $0.contains(trimmedQuery) }
+        // Sort by last seen date. Most recently seen first by default; flip `sortAscending`
+        // for oldest first. Hosts with no `lastSeenDate` sort to the bottom either way.
+        filtered.sort { a, b in
+            switch (a.lastSeenDate, b.lastSeenDate) {
+            case let (aDate?, bDate?):
+                return sortAscending ? aDate < bDate : aDate > bDate
+            case (nil, nil):
+                return a.id < b.id
+            case (nil, _):
+                return false
+            case (_, nil):
+                return true
             }
-            return fields.contains { $0.contains(trimmedQuery) }
         }
+        
+        hosts = filtered
     }
     
     func logout() async {
