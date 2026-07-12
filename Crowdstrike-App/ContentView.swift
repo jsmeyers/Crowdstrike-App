@@ -5,6 +5,7 @@ struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
     @State private var viewModel: HostsViewModel?
     @State private var showFilters = false
+    private let refreshInterval: TimeInterval = 5 * 60 // 5 minutes
     
     var body: some View {
         Group {
@@ -36,6 +37,7 @@ struct ContentView: View {
                     if viewModel.hasCredentials && viewModel.allHosts.isEmpty {
                         await viewModel.loadHosts()
                     }
+                    await startPeriodicRefresh()
                 }
             } else {
                 ProgressView()
@@ -44,6 +46,29 @@ struct ContentView: View {
         .onAppear {
             if viewModel == nil {
                 viewModel = HostsViewModel(modelContext: modelContext)
+            }
+        }
+    }
+    
+    /// Periodically refreshes endpoints and alerts every `refreshInterval` seconds while the
+    /// app is active and the user is authenticated. The loop is tied to the view's lifetime via
+    /// `.task`, so it is automatically cancelled when the view disappears.
+    private func startPeriodicRefresh() async {
+        guard let viewModel else { return }
+        while !Task.isCancelled {
+            do {
+                try await Task.sleep(nanoseconds: UInt64(refreshInterval * 1_000_000_000))
+            } catch {
+                // Task was cancelled (view disappeared / app backgrounded); stop looping.
+                break
+            }
+            guard viewModel.hasCredentials else { continue }
+            // Refresh whichever tab is visible to avoid unnecessary work, but keep both fresh.
+            switch viewModel.selectedTab {
+            case .endpoints:
+                await viewModel.refreshEndpoints()
+            case .alerts:
+                await viewModel.refreshAlertsOnly()
             }
         }
     }
